@@ -1,0 +1,9 @@
+# Private: the owner's store (all edits, private and public) and the icon cache.
+data/
+# Built by tools/build_site.js (locally or in GitHub Actions).
+site/
+# This PC only: local version control, machine-specific settings, internal notes.
+.svn/
+start.local.bat
+private-patterns.txt
+handover.md

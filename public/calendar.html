@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PoGo Calendar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="calendar.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>PoGo Calendar</h1>
+    <p id="status" class="status">Loading…</p>
+  </div>
+  <nav class="monthnav" aria-label="Month">
+    <button id="prev" class="btn icon" aria-label="Previous month">‹</button>
+    <h2 id="monthTitle">Month</h2>
+    <button id="next" class="btn icon" aria-label="Next month">›</button>
+    <button id="today" class="btn">Today</button>
+  </nav>
+  <div class="actions">
+    <label class="switch"><input type="checkbox" id="bars" checked> Event bars</label>
+    <button id="refresh" class="btn">Check Leek Duck</button>
+    <button id="pubBtn" class="btn" title="See and publish what you have marked for the public site">Public…</button>
+    <button id="exportBtn" class="btn" title="Save your rest days, targets and edits as a file to keep or share">Export</button>
+    <button id="importBtn" class="btn" title="Add rest days, targets and edits from a shared file">Import</button>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+    <button id="addEvent" class="btn primary">+ Add event</button>
+    <button id="helpBtn" class="btn icon" aria-label="How to use this calendar" title="How to use this calendar">?</button>
+  </div>
+</header>
+
+<div id="welcome" class="banner welcome" hidden>
+  <p><b>Welcome!</b> This calendar shows the Pokémon GO events worth planning around, in Singapore time. You can mark
+  your own rest days, add target Pokémon and edit events. <b>Your changes are saved only in this browser</b>:
+  nobody else sees them. Use <b>Export</b> to keep a copy or share your plan with friends.</p>
+  <div class="welcome-actions"><button id="welcomeHelp" class="btn">How it works</button><button id="welcomeClose" class="btn primary">Got it</button></div>
+</div>
+
+<div id="previewBar" class="banner preview" hidden>
+  <p><b>Public preview:</b> this is what visitors see (before any changes of their own). Editing is off.</p>
+  <button id="previewExit" class="btn primary">Back to my calendar</button>
+</div>
+
+<dialog id="pubDlg" class="editor">
+  <div class="help-body">
+    <h2>What's public</h2>
+    <p id="pubStatus" class="muted"></p>
+    <h3>Events</h3>
+    <div id="pubEvents" class="pub-list"></div>
+    <h3>Days</h3>
+    <div id="pubDays" class="pub-list"></div>
+    <p class="muted small">Everything not listed here stays private on this PC. Tick "Show … on the public site" on an event
+      or a day to add it. Publish writes the list to public/public.json; commit and push that file to update the site.</p>
+    <div class="editor-actions">
+      <button id="pubPreview" class="btn">Preview public site</button>
+      <button id="pubExport" class="btn" title="Export only what is listed here">Export public only</button>
+      <span class="spacer"></span>
+      <button id="pubClose" class="btn">Close</button>
+      <button id="publish" class="btn primary">Publish</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="expDlg" class="editor">
+  <div class="help-body">
+    <h2>Export my changes</h2>
+    <p class="muted">Saves your rest days, targets, stars, comments and event edits as a file, to keep or to share.
+      Whoever imports it sees your name on what you suggested.</p>
+    <label class="field">Your name (optional; shown to whoever imports it)<input id="expName" maxlength="40" placeholder="e.g. Alex"></label>
+    <label id="expScopeRow" class="field">What to export
+      <select id="expScope">
+        <option value="all">All my changes (private and public)</option>
+        <option value="public">Only what I have made public</option>
+      </select></label>
+    <div class="editor-actions"><span class="spacer"></span>
+      <button id="expCancel" class="btn">Cancel</button><button id="expDo" class="btn primary">Export</button></div>
+  </div>
+</dialog>
+
+<dialog id="help" class="editor help">
+  <div class="help-body">
+    <h2>How to use PoGo Calendar</h2>
+    <h3>Making it your own</h3>
+    <ul>
+      <li><b>Add target Pokémon:</b> click a day and add the Pokémon you want to go for there. You can pick a form, e.g.
+        Giratina (Origin). ☆ stars a target, which gets a rainbow ring, and you can give it a comment that shows when you
+        hover it.</li>
+      <li><b>Edit</b> any event (title, times, Pokémon, how it is shown), or <b>+ Add event</b> for your own.
+        <b>Undo my changes</b> puts an event back as it was.</li>
+      <li><b>Plan rest days:</b> tick <b>Rest day</b> in a day, and add a note if you like. Grey days have nothing major on,
+        so they are good candidates.</li>
+      <li id="helpStatic">Everything you change is saved <b>only in this browser</b> on this device. Nobody else sees it, and it
+        is not sent anywhere. Clearing your browser data removes it, so keep a copy with Export.</li>
+    </ul>
+    <h3>Reading the calendar</h3>
+    <ul>
+      <li><b>Big icons</b> are the Pokémon of events that draw crowds: Raid Hour, Spotlight Hour, Raid Days, Max Battle
+        Days, Max Monday, Community Day and global GO Fest / Tour / Wild Area days.</li>
+      <li><b>Small icons in a day's bottom-right corner</b> are the week's raid bosses; the thin <b>bars</b> show how long
+        each rotation runs.</li>
+      <li>The pin at an icon's bottom-right is the activity:
+        <div id="helpPins" class="help-pins"></div>
+        Also on icons: <span id="helpExtras" class="help-pins"></span></li>
+      <li><b>Hover an icon</b> for a bigger picture, the hundo catch CP (normal and weather boosted), event times, and for
+        region-locked Pokémon when the event is live in their region.</li>
+      <li>Day colours: <span class="sw sw-super"></span> super major event · <span class="sw sw-overseas"></span> overseas
+        event (✈, remote passes needed for raids; times converted to SGT) · <span class="sw sw-rest"></span> rest day ·
+        <span class="sw sw-mundane"></span> nothing major.</li>
+      <li>Click a day for everything on it, including smaller events. Tap a pin in the legend to hide that activity.</li>
+    </ul>
+    <h3>Sharing</h3>
+    <ul>
+      <li><b>Export</b> saves your changes (rest days, targets, stars, comments, event edits) as a small file.</li>
+      <li><b>Import</b> adds a file like that, from another device or a friend, to your calendar. Nothing already there is
+        removed: rest days are combined, notes are appended, and targets are added.</li>
+    </ul>
+    <p class="muted small">Event data and icons come from Leek Duck and are refreshed every few hours.
+      Times are Singapore time (SGT).</p>
+    <div class="editor-actions"><span class="spacer"></span><button id="helpClose" class="btn primary">Close</button></div>
+  </div>
+</dialog>
+
+<div id="offline" class="banner" hidden></div>
+
+<section class="legend" aria-label="Activity filter">
+  <div id="legend" class="legend-pins"></div>
+  <p class="hint">
+    <span class="sw sw-super"></span> super major day
+    <span class="sw sw-overseas"></span> overseas event (remote, times in SGT)
+    <span class="sw sw-rest"></span> rest day
+    <span class="sw sw-mundane"></span> nothing major
+    · big icons: major events · small corner icons: weekly raid rotations
+    · <span class="spark-key">✦</span> shiny · <span class="bg-key">BG</span> special background
+    · <span class="lock-key">🔒</span> region-locked (orange: other region, hover for SGT timings) · tap a pin to hide that activity
+  </p>
+</section>
+
+<details id="running" class="running">
+  <summary>Running this month (<span id="runningCount">0</span>): longer events, seasons and passes</summary>
+  <div id="runningList" class="running-list"></div>
+</details>
+
+<main>
+  <div class="cal">
+    <div class="grid-head" aria-hidden="true">
+      <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+    </div>
+    <div id="grid" class="grid"></div>
+  </div>
+</main>
+
+<footer class="credit">Event data and Pokémon icons: <a href="https://leekduck.com/events/" target="_blank" rel="noopener">Leek Duck</a>.
+  Pokémon GO is a trademark of Niantic; Pokémon of Nintendo, Creatures and Game Freak. Unofficial fan tool.</footer>
+
+<aside id="day" class="day" hidden aria-label="Day details">
+  <div class="day-head">
+    <h2 id="dayTitle">Day</h2>
+    <button id="dayClose" class="btn icon" aria-label="Close">×</button>
+  </div>
+  <label class="switch rest"><input type="checkbox" id="dayRest"> Rest day</label>
+  <label id="dayPublicRow" class="switch"><input type="checkbox" id="dayPublic"> Show this day's rest, note and targets on the public site</label>
+  <label class="field">Note<textarea id="dayNote" rows="2" placeholder="Plans, reminders…"></textarea></label>
+  <h3>My targets this day</h3>
+  <div id="dayPokemon"></div>
+  <h3>Events</h3>
+  <div id="dayEvents" class="day-events"></div>
+  <button id="dayAddEvent" class="btn">+ Add event on this day</button>
+</aside>
+
+<dialog id="editor" class="editor">
+  <form id="editorForm" method="dialog">
+    <h2 id="editorTitle">Edit event</h2>
+    <p id="editorSource" class="muted"></p>
+    <label class="field">Title<input id="evTitle" required maxlength="200"></label>
+    <div class="row">
+      <label class="field">Type<select id="evType"></select></label>
+      <label class="field">Shown as<select id="evTier"></select></label>
+    </div>
+    <div class="row">
+      <label class="field">Location<select id="evTz"></select></label>
+      <label class="field">Link<input id="evUrl" type="url" placeholder="https://"></label>
+    </div>
+    <p id="evZoneHint" class="muted small"></p>
+    <div class="row">
+      <label class="field">Starts<input id="evStart" type="datetime-local" required></label>
+      <label class="field">Ends<input id="evEnd" type="datetime-local"></label>
+    </div>
+    <label class="field">Note<textarea id="evNote" rows="2"></textarea></label>
+    <h3>Pokémon</h3>
+    <div id="evPokemon"></div>
+    <label class="switch"><input type="checkbox" id="evHidden"> Hide this event from the calendar</label>
+    <label id="evPublicRow" class="switch"><input type="checkbox" id="evPublic"> Show my changes to this event on the public site</label>
+    <p id="editorError" class="error" hidden></p>
+    <div class="editor-actions">
+      <button type="button" id="evRevert" class="btn danger">Delete</button>
+      <span class="spacer"></span>
+      <button type="button" id="evCancel" class="btn">Cancel</button>
+      <button type="submit" id="evSave" class="btn primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<datalist id="dexNames"></datalist>
+<script src="pokedex.js"></script>
+<script src="calendar.js"></script>
+</body>
+</html>

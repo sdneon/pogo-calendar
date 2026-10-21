@@ -1,0 +1,51 @@
+# Build the static PoGo Calendar from Leek Duck every 6 hours and publish it with GitHub Pages.
+# Needs: Settings > Pages > Source = "GitHub Actions". Optional repository variable SITE_URL (the live
+# site's URL, e.g. https://sdneon.github.io/pogo-calendar/) lets each run reuse the previous events.json,
+# so only new or stale Leek Duck detail pages are fetched.
+name: Build calendar site
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Restore icon cache
+        uses: actions/cache@v4
+        with:
+          path: site/icons
+          key: icons-${{ github.run_id }}
+          restore-keys: icons-
+      - name: Scrape Leek Duck and build site/
+        run: node tools/build_site.js --known "${{ vars.SITE_URL }}events.json"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
