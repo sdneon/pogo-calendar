@@ -143,6 +143,13 @@ The same page runs in two modes. `STATIC` in `calendar.js` is true unless the pa
 - **Grid:** weeks start on Monday. Each week is a 7-column CSS grid. Cells span all its rows, and bars sit in lanes 2… along the bottom (at most 3 lanes, set by `--lanes`). Cells pad their bottom by the lane height. A cell shows up to 6 big icons, then "+n", plus at most 5 small corner icons. Sat/Sun cells get a 2px `--weekend` outline, and their column headers are bold.
 - **Season events:** events longer than 14 days (`SEASON_DAYS`) never put Pokémon on cells. They are listed in the collapsed "Running this month" section, with their valuable icons.
 - **Icons:**
+  - each icon tries a chain of candidates until one loads (`cdnIcons()`):
+    1. the Pokémon's own Leek Duck icon;
+    2. the icon the same name has in any scraped event (so a target "Gigantamax Duraludon" gets the event art);
+    3. the form sprite `pm<dex>.f<FORM>.icon.png`, built from the name ("(Crowned Shield)" → `CROWNED_SHIELD`, "Mega … X" → `MEGA_X`, "Alolan" → `ALOLA`, a trailing "Forme"/"Form" dropped), from Leek Duck, then PokeMiners' `pogo_assets` (same names, CORS-open);
+    4. the base species sprite `pm<dex>.icon.png`, then the old `pokemon_icon_<dex>_00.png`, which newer species lack.
+
+    The server remembers CDN 404s for a day, so the chain doesn't keep asking. The static site ships every featured icon, base sprites for featured species, and all legendary / mythical / Ultra Beast base sprites.
   - each icon is cropped to its visible pixels on a canvas, then cached as a data URL, because Leek Duck sprites have uneven padding that made small species tiny. This needs the icon proxy's CORS header (or same-origin icons on the static site);
   - the pin goes bottom-right, a ✦ sparkle top-right for shiny, "BG" bottom-left for a special background, and a padlock top-left for a region lock;
   - user-added Pokémon (`mine`) can be starred, which shows a two-arc rainbow swirl adapted from the Cluedo current-player token, and can carry a tooltip comment.

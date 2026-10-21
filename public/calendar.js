@@ -143,20 +143,53 @@ function hundo(p) {
   const cp = (cpm) => Math.max(10, Math.floor((a + 15) * Math.sqrt(d + 15) * Math.sqrt(s + 15) * cpm * cpm / 10));
   return { form: form[0], cp20: cp(window.POGO_CPM[20]), cp25: MAX_ACTS.has(p.act) ? null : cp(window.POGO_CPM[25]) };
 }
-function cdnIcon(p) {
-  if (p.icon) return p.icon;
+// Icons: a chain of Leek Duck CDN candidates, tried in order until one loads:
+//   1. the Pokémon's own icon (from Leek Duck);
+//   2. the icon the same name has in any scraped event (e.g. a target "Gigantamax Duraludon");
+//   3. the form sprite pm<dex>.f<FORM>.icon.png ("Zamazenta (Crowned Shield)" -> fCROWNED_SHIELD), from Leek Duck,
+//      then from PokeMiners' copy of the game assets (same names, CORS-open);
+//   4. the base species sprite pm<dex>.icon.png, then the older pokemon_icon_<dex>_00.png.
+// Brand-new forms (e.g. Gigantamax Duraludon in 2026) may have no sprite anywhere yet; step 2 then uses the
+// event art Leek Duck published, and step 4 the base species.
+const SPRITES = 'https://cdn.leekduck.com/assets/img/pokemon_icons/';
+const POGO_ASSETS = 'https://raw.githubusercontent.com/PokeMiners/pogo_assets/master/Images/Pokemon/Addressable%20Assets/';
+const FORM_PREFIX = { mega: 'MEGA', primal: 'PRIMAL', gigantamax: 'GIGANTAMAX', alolan: 'ALOLA', galarian: 'GALARIAN', hisuian: 'HISUIAN', paldean: 'PALDEA' };
+let knownIcons = null;
+let knownFor = null;
+function knownIcon(name) {
+  if (knownFor !== data) {
+    knownFor = data;
+    knownIcons = new Map();
+    for (const ev of data.events) for (const q of ev.pokemon || []) if (q.icon && !knownIcons.has(q.name.toLowerCase())) knownIcons.set(q.name.toLowerCase(), q.icon);
+  }
+  return knownIcons.get(String(name).toLowerCase());
+}
+function cdnIcons(p) {
+  const list = [];
+  if (p.icon) list.push(p.icon);
+  const known = knownIcon(p.name);
+  if (known) list.push(known);
   const dex = p.dex || lookup(p.name)?.dex;
-  return dex ? `https://cdn.leekduck.com/assets/img/pokemon_icons/pokemon_icon_${String(dex).padStart(3, '0')}_00.png` : '';
+  if (dex) {
+    const form = [];
+    const prefix = FORM_PREFIX[(/^(\w+)\s/.exec(p.name)?.[1] || '').toLowerCase()];
+    if (prefix) form.push(prefix + (prefix === 'MEGA' && /\s[XY]$/.test(p.name) ? `_${p.name.slice(-1)}` : ''));
+    const paren = /\(([^)]*)\)/.exec(p.name)?.[1];
+    if (paren && !paren.includes(',')) form.push(paren.replace(/\s+(formes?|forms?|cloak|style|mode|size)$/i, '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_'));
+    if (form.length) list.push(`${SPRITES}pm${dex}.f${form.join('_')}.icon.png`, `${POGO_ASSETS}pm${dex}.f${form.join('_')}.icon.png`);
+    list.push(`${SPRITES}pm${dex}.icon.png`, `${SPRITES}pokemon_icon_${String(dex).padStart(3, '0')}_00.png`);
+  }
+  return [...new Set(list)];
 }
 // Same rule as lib/iconfile.js: the static site ships icons/<file>, built by tools/build_site.js.
 const iconFile = (url) => url.replace(/^https:\/\/cdn\.leekduck\.com\//, '').replace(/[^\w.-]+/g, '_').slice(-180);
-function iconUrl(p) {
-  const src = cdnIcon(p);
-  if (!src) return '';
-  return STATIC ? `icons/${iconFile(src)}` : `${API}/icon?u=${encodeURIComponent(src)}`;
-}
-// Static site: an icon not shipped with it (e.g. a Pokémon a visitor added) comes straight from the CDN.
-const iconFallback = (p) => (STATIC ? cdnIcon(p) : '');
+// Where the page loads an icon from: on the static site its own copy first, then the source itself (for icons
+// the site doesn't ship, e.g. a Pokémon a visitor added); locally, Leek Duck icons via the server's caching
+// proxy, PokeMiners ones directly (they allow cropping).
+const viaPage = (u) => (STATIC ? [`icons/${iconFile(u)}`, u]
+  : u.startsWith(POGO_ASSETS) ? [u] : [`${API}/icon?u=${encodeURIComponent(u)}`]);
+const iconUrls = (p) => cdnIcons(p).flatMap(viaPage);
+const iconUrl = (p) => iconUrls(p)[0] || '';
 
 // ---------- time zones ----------
 const pad = (n) => String(n).padStart(2, '0');
@@ -538,13 +571,30 @@ function sparkle() {
 }
 // Leek Duck icons carry lots of transparent padding (most for small species such as Morelull), so each
 // icon is cropped to its visible pixels once and reused as a data URL.
-const TRIMMED = new Map(); // icon url -> Promise<data url | url>
-function trimmed(src, fallback = '') {
-  if (!TRIMMED.has(src)) {
-    TRIMMED.set(src, new Promise((resolve) => {
+const CROPPED = new Map(); // icon url -> Promise<data url | url (loads, but can't be cropped) | null (missing)>
+const TRIMMED = new Map(); // candidate chain -> Promise<first that loads, or ''>
+function trimmed(urls) {
+  const key = urls.join('|');
+  if (!TRIMMED.has(key)) {
+    TRIMMED.set(key, (async () => {
+      for (const u of urls) { const r = await cropOne(u); if (r) return r; }
+      return '';
+    })());
+  }
+  return TRIMMED.get(key);
+}
+function cropOne(src) {
+  if (!CROPPED.has(src)) {
+    CROPPED.set(src, new Promise((resolve) => {
       const im = new Image();
       im.crossOrigin = 'anonymous';
-      im.onerror = () => (fallback ? trimmed(fallback).then(resolve) : resolve(src));
+      im.onerror = () => {
+        // A CORS refusal looks like an error too: try once without CORS, uncropped.
+        const plain = new Image();
+        plain.onload = () => resolve(src);
+        plain.onerror = () => resolve(null);
+        plain.src = src;
+      };
       im.onload = () => {
         try {
           const w = im.naturalWidth, h = im.naturalHeight;
@@ -569,7 +619,7 @@ function trimmed(src, fallback = '') {
       im.src = src;
     }));
   }
-  return TRIMMED.get(src);
+  return CROPPED.get(src);
 }
 // Padlock: teal when the lock is to the home region (catchable here), orange when elsewhere.
 function lockPin(region) {
@@ -599,11 +649,10 @@ function regionWindows(ev, region) {
 const fmtDayTime = (ms) => fmt(ms, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 const TIP = new WeakMap(); // icon element -> {p, ev}
 function monIcon(p, ev, size = '') {
-  const src = iconUrl(p);
-  const img = src
-    ? el('img', { alt: p.name, onerror: (e) => e.target.replaceWith(el('span', { class: 'noimg', text: p.name })) })
-    : el('span', { class: 'noimg', text: p.name });
-  if (src) trimmed(src, iconFallback(p)).then((u) => { img.src = u; });
+  const urls = iconUrls(p);
+  const noimg = () => el('span', { class: 'noimg', text: p.name });
+  const img = urls.length ? el('img', { alt: p.name, onerror: (e) => e.target.replaceWith(noimg()) }) : noimg();
+  if (urls.length) trimmed(urls).then((u) => { if (u) img.src = u; else img.replaceWith(noimg()); });
   const n = el('span', { class: ['mon', size, p.star && 'star', p.mine && 'mine'].filter(Boolean).join(' '), 'aria-label': p.name },
     img, pin(p.act), p.shiny ? sparkle() : null, p.bg ? el('span', { class: 'bgpin', text: 'BG' }) : null,
     REGIONS[p.region] ? lockPin(p.region) : null);
@@ -764,7 +813,7 @@ function renderRunning(first, nextMonth) {
 
 // ---------- rich tooltip ----------
 function tipContent({ p, ev }) {
-  const big = iconUrl(p);
+  const big = iconUrls(p).length > 0;
   const cls = classOf(p);
   const h = hundo(p);
   const rows = [];
@@ -795,7 +844,7 @@ function tipContent({ p, ev }) {
   else if (p.mine) rows.push(el('div', { class: 'muted', text: p.star ? 'Your starred target' : 'Added by you' }));
   if (p.comment) rows.push(el('div', { class: 'tip-comment', text: p.comment }));
   const bigImg = big ? el('img', { alt: '' }) : null;
-  if (big) trimmed(big, iconFallback(p)).then((u) => { bigImg.src = u; });
+  if (big) trimmed(iconUrls(p)).then((u) => { if (u) bigImg.src = u; else bigImg.remove(); });
   return el('div', { class: 'tip-body' }, bigImg, el('div', { class: 'tip-text' }, rows));
 }
 function remoteNote(p, ev) {

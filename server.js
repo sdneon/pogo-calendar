@@ -56,8 +56,11 @@ function readJson(req) {
   });
 }
 
+// The page tries several candidate icons in turn; remember CDN misses for a day instead of asking again.
+const MISSING = new Map(); // url -> time of the 404
 async function icon(res, url) {
-  if (!/^https:\/\/cdn\.leekduck\.com\/[\w\-./%@=,]+$/.test(url)) return send(res, 400, { error: 'not a Leek Duck CDN image' });
+  if (!/^https:\/\/cdn\.leekduck\.com\/[\w\-./%@=,]+(\?[\w=&.-]*)?$/.test(url)) return send(res, 400, { error: 'not a Leek Duck CDN image' });
+  if (Date.now() - (MISSING.get(url) || 0) < 86400e3) return send(res, 404, { error: 'not on the CDN' });
   const name = iconFile(url);
   const file = path.join(ICONS, name);
   const type = TYPES[path.extname(name).toLowerCase()] || 'image/png';
@@ -65,6 +68,7 @@ async function icon(res, url) {
   if (fs.existsSync(file)) return send(res, 200, fs.readFileSync(file), cache);
   try {
     const r = await fetch(url);
+    if (r.status === 404) { MISSING.set(url, Date.now()); return send(res, 404, { error: 'not on the CDN' }); }
     if (!r.ok) return send(res, 502, { error: `CDN ${r.status}` });
     const buf = Buffer.from(await r.arrayBuffer());
     fs.mkdirSync(ICONS, { recursive: true });

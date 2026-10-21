@@ -57,14 +57,20 @@ async function main() {
   fs.writeFileSync(path.join(SITE, '.nojekyll'), '');
   fs.copyFileSync(path.join(SITE, 'calendar.html'), path.join(SITE, 'index.html'));
 
-  // Icons for every featured Pokémon, plus the plain species icon for title-derived ones.
+  // Icons for every featured Pokémon, plus base species sprites (pm<dex>.icon.png): the page's fallback for
+  // forms without their own sprite. Also every legendary / mythical / Ultra Beast, the likely targets visitors
+  // add themselves.
+  const SPRITES = 'https://cdn.leekduck.com/assets/img/pokemon_icons/';
   const urls = new Set();
   for (const ev of events) {
     for (const p of ev.pokemon || []) {
       if (p.icon && CDN.test(p.icon)) urls.add(p.icon);
-      else if (p.dex) urls.add(`https://cdn.leekduck.com/assets/img/pokemon_icons/pokemon_icon_${String(p.dex).padStart(3, '0')}_00.png`);
+      if (p.dex) urls.add(`${SPRITES}pm${p.dex}.icon.png`);
     }
   }
+  global.window = {};
+  require(path.join(ROOT, 'public', 'pokedex.js'));
+  for (const [dex, , cls] of window.POGO_DEX) if (cls) urls.add(`${SPRITES}pm${dex}.icon.png`);
   let fetched = 0;
   for (const url of urls) {
     const file = path.join(ICONS, iconFile(url));
