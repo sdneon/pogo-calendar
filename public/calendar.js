@@ -104,8 +104,8 @@ const store = {
 // ---------- pokédex ----------
 const DEX = new Map(); // lower-case name -> {dex, name, cls, forms}
 const DEX_BY_NO = new Map();
-for (const [dex, name, cls, forms] of window.POGO_DEX || []) {
-  const e = { dex, name, cls: cls || '', forms: forms || [] };
+for (const [dex, name, cls, forms, temp] of window.POGO_DEX || []) {
+  const e = { dex, name, cls: cls || '', forms: forms || [], temp: temp || {} };
   DEX.set(name.toLowerCase(), e);
   DEX_BY_NO.set(dex, e);
 }
@@ -129,16 +129,65 @@ const classOf = (p) => entryOf(p)?.cls || '';
 const CLASS_NAME = { L: 'Legendary', M: 'Mythical', U: 'Ultra Beast' };
 const isValuable = (p) => !!classOf(p) || ['mega', 'supermega', 'shadow', 'gmax'].includes(p.act);
 
+// The pokédex form a name means: "(Origin)" in brackets, or a regional prefix, else the normal form.
+function formOf(p, e) {
+  const paren = (/\(([^)]*)\)/.exec(p.name)?.[1] || '').toLowerCase();
+  const region = (REGION.exec(p.name.replace(PREFIX, ''))?.[1] || '').toLowerCase().slice(0, 5);
+  return e.forms.find((f) => f[0] && paren && paren.includes(f[0].toLowerCase()))
+    || e.forms.find((f) => f[0] && region && f[0].toLowerCase().startsWith(region))
+    || e.forms.find((f) => f[0] === '' || f[0] === 'Normal') || e.forms[0];
+}
+// Mega / Primal key in the pokédex ("Mega Charizard X" -> MEGA_X), or '' for other names.
+function tempKey(p) {
+  const m = /^(mega|primal)\s/i.exec(p.name);
+  if (!m) return '';
+  const xy = /\s([XY])(\s*\(.*\))?$/.exec(p.name)?.[1];
+  return m[1].toUpperCase() + (xy ? `_${xy}` : '');
+}
+function typesOf(p) {
+  const e = entryOf(p);
+  if (!e) return [];
+  const k = tempKey(p);
+  return (k && e.temp[k]) || (e.forms.length ? formOf(p, e)[4] || [] : []);
+}
+// Type colours (standard Pokémon GO palette).
+const TYPE_COLORS = { Normal: '#a8a77a', Fire: '#ee8130', Water: '#6390f0', Electric: '#f7d02c', Grass: '#7ac74c', Ice: '#96d9d6',
+  Fighting: '#c22e28', Poison: '#a33ea1', Ground: '#e2bf65', Flying: '#a98ff3', Psychic: '#f95587', Bug: '#a6b91a', Rock: '#b6a136',
+  Ghost: '#735797', Dragon: '#6f35fc', Dark: '#705746', Steel: '#b7b7ce', Fairy: '#d685ad' };
+const LIGHT_TYPES = new Set(['Electric', 'Ice', 'Ground', 'Steel', 'Normal', 'Rock', 'Bug', 'Grass']);
+// Megas that can reach Super Max Level (Mega Level 4), with the extra Charged Attack it unlocks.
+// Source: pokemongo.fandom.com/wiki/Mega_Evolution, list checked 2026-10-26.
+const SUPER_MAX = { 'Mega Beedrill': 'Fell Stinger+', 'Mega Raichu X': 'Volt Tackle+', 'Mega Raichu Y': 'Zap Cannon+',
+  'Mega Victreebel': 'Acid Spray+', 'Mega Starmie': 'Liquidation+', 'Mega Dragonite': 'Outrage+', 'Mega Mewtwo X': 'Dynamic Punch+',
+  'Mega Mewtwo Y': 'Future Sight+', 'Mega Skarmory': 'Drill Peck+', 'Mega Houndoom': 'Dark Pulse+', 'Mega Manectric': 'Discharge+',
+  'Mega Staraptor': 'Brave Bird+', 'Mega Chesnaught': 'Seed Bomb+', 'Mega Delphox': 'Mystical Fire+', 'Mega Greninja': 'Surf+',
+  'Mega Malamar': 'Psybeam+', 'Mega Falinks': 'Brick Break+' };
+// Announced unlock days (SGT) for Megas not in that list yet. A Super Mega Raid Day also unlocks its featured Mega.
+const SUPER_MAX_FROM = { 'Mega Sableye': '2026-11-01' };
+const megaKey = (name) => name.replace(/\s*\(.*\)$/, '').replace(/^Super\s+/i, '');
+// {move, from: 'YYYY-MM-DD' or '', state: 'yes' | 'during' | 'later' | 'no'} for the event's time (or now).
+function superMaxInfo(p, ev) {
+  const key = megaKey(p.name);
+  const move = SUPER_MAX[key] || '';
+  let from = '';
+  if (!move) {
+    const days = [SUPER_MAX_FROM[key], ...data.events.filter((e) => /super mega raid day/i.test(e.title)
+      && (e.pokemon || []).some((q) => megaKey(q.name) === key)).map((e) => homeDay(evRange(e)[0]))].filter(Boolean).sort();
+    from = days[0] || '';
+  }
+  if (move) return { move, from, state: 'yes' };
+  if (!from) return { move, from, state: 'no' };
+  const [s, e] = ev ? evRange(ev) : [Date.now(), Date.now() + 1];
+  const t = dayStart(from);
+  return { move, from, state: t <= s ? 'yes' : t < e ? 'during' : 'later' };
+}
+
 // Hundo (15/15/15) catch CP at level 20, and level 25 when weather boosted.
 function hundo(p) {
   if (!RAID_ACTS.has(p.act) || !window.POGO_CPM) return null;
   const e = entryOf(p);
   if (!e || !e.forms.length) return null;
-  const paren = (/\(([^)]*)\)/.exec(p.name)?.[1] || '').toLowerCase();
-  const region = (REGION.exec(p.name)?.[1] || '').toLowerCase().slice(0, 5);
-  const form = e.forms.find((f) => f[0] && paren && paren.includes(f[0].toLowerCase()))
-    || e.forms.find((f) => f[0] && region && f[0].toLowerCase().startsWith(region))
-    || e.forms.find((f) => f[0] === '' || f[0] === 'Normal') || e.forms[0];
+  const form = formOf(p, e);
   const [, a, d, s] = form;
   const cp = (cpm) => Math.max(10, Math.floor((a + 15) * Math.sqrt(d + 15) * Math.sqrt(s + 15) * cpm * cpm / 10));
   return { form: form[0], cp20: cp(window.POGO_CPM[20]), cp25: MAX_ACTS.has(p.act) ? null : cp(window.POGO_CPM[25]) };
@@ -307,10 +356,12 @@ const tierOf = (ev) => ev.tier || autoTier(ev);
 // Static mode (e.g. GitHub Pages): events.json (Leek Duck snapshot) + public.json (the owner's published
 // edits), with the visitor's own changes kept in localStorage (MINE_KEY) and merged on top, in memory only.
 async function api(method, path, body) {
+  // The server only accepts JSON writes, so a write without a body still sends {}.
+  const write = method !== 'GET';
   const res = await fetch(API + path, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
+    headers: write ? { 'Content-Type': 'application/json' } : {},
+    body: write ? JSON.stringify(body || {}) : undefined,
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || `${res.status} ${res.statusText}`);
@@ -635,6 +686,20 @@ function lockPin(region) {
   svg.append(shackle, body);
   return svg;
 }
+// Location Background mark: a wireframe globe (left edge). Special Backgrounds keep the "BG" tag.
+function globePin(place) {
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 12 12');
+  svg.setAttribute('class', 'globe');
+  svg.setAttribute('aria-label', `Location Background: ${place}`);
+  for (const d of ['M6 1a5 5 0 1 0 0.001 0Z', 'M6 1c-2.6 2.6-2.6 7.4 0 10M6 1c2.6 2.6 2.6 7.4 0 10', 'M1 6h10M1.8 3.5h8.4M1.8 8.5h8.4']) {
+    const path = document.createElementNS(SVGNS, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+const debutBadge = (p) => el('span', { class: `newpin${p.debut === 'shiny' ? ' shiny' : ''}`, text: 'NEW' });
 // When a local-time event window is live across a region, as SGT times per sample place.
 function regionWindows(ev, region) {
   const R = REGIONS[region];
@@ -655,17 +720,28 @@ function monIcon(p, ev, size = '') {
   if (urls.length) trimmed(urls).then((u) => { if (u) img.src = u; else img.replaceWith(noimg()); });
   const n = el('span', { class: ['mon', size, p.star && 'star', p.mine && 'mine'].filter(Boolean).join(' '), 'aria-label': p.name },
     img, pin(p.act), p.shiny ? sparkle() : null, p.bg ? el('span', { class: 'bgpin', text: 'BG' }) : null,
-    REGIONS[p.region] ? lockPin(p.region) : null);
+    REGIONS[p.region] ? lockPin(p.region) : null, p.lbg ? globePin(p.lbg) : null, p.debut ? debutBadge(p) : null);
   TIP.set(n, { p, ev });
   return n;
 }
 const visibleEvents = () => data.events.filter((e) => !e.hidden);
+// An event's Pokémon as shown everywhere: one listed both in a feature blurb ('event', e.g. a debut section) and
+// with a real activity (e.g. wild spawn) appears once, as the latter.
+function eventPokemon(ev) {
+  const list = ev.pokemon || [];
+  const acted = new Set(list.filter((p) => p.act !== 'event').map((p) => p.name));
+  return list.filter((p) => !(p.act === 'event' && acted.has(p.name)));
+}
+// Order in event boxes and bar tooltips: the user's own, raid bosses, debuts, valuable ones.
+const monRank = (p) => (p.mine ? 8 : 0) + (RAID_ACTS.has(p.act) ? 4 : 0) + (p.debut ? 2 : 0) + (isValuable(p) ? 1 : 0);
+// The user's own events come before Leek Duck ones of the same tier (cell icons and day panel).
+const mineFirst = (a, b) => (b.source === 'user') - (a.source === 'user');
 const monKey = (p) => `${(p.dex || p.name).toString().toLowerCase()}|${p.act}`;
 const shownAct = (p) => !prefs.off.includes(p.act);
 
 // What one day holds: which events in which tier, and the icons for the cell.
 function dayInfo(day) {
-  const evs = visibleEvents().filter((ev) => onDay(ev, day));
+  const evs = visibleEvents().filter((ev) => onDay(ev, day)).sort(mineFirst);
   const by = { super: [], major: [], weekly: [], minor: [] };
   for (const ev of evs) by[tierOf(ev)].push(ev);
   const seen = new Set();
@@ -677,8 +753,8 @@ function dayInfo(day) {
   for (const ev of [...by.super, ...by.major]) {
     if (spanDays(ev) > SEASON_DAYS) continue;
     const big = by.super.includes(ev) || isOverseas(ev);
-    const mons = (ev.pokemon || []).filter((p) => !big || p.mine || isValuable(p) || RAID_ACTS.has(p.act))
-      .sort((a, b) => !!b.mine - !!a.mine || isValuable(b) - isValuable(a));
+    const mons = eventPokemon(ev).filter((p) => !big || p.mine || isValuable(p) || RAID_ACTS.has(p.act) || p.act === 'cd' || p.debut)
+      .sort((a, b) => !!b.mine - !!a.mine || !!b.debut - !!a.debut || isValuable(b) - isValuable(a));
     for (const p of mons) take(null, main, p, ev);
   }
   const corner = [];
@@ -711,6 +787,7 @@ function render() {
   renderLegend();
   renderRunning(first, addDays(first, new Date(Date.UTC(y, m, 0)).getUTCDate()));
 
+  weekBars = prefs.bars ? maxWeekBars() : [];
   const grid = $('grid');
   grid.replaceChildren();
   let day = addDays(first, -weekday(first));
@@ -722,25 +799,39 @@ function render() {
   if (selected) renderDay();
 }
 
-const MAX_LANES = 3;
+const MAX_LANES = 4;
+// Max Monday's Dynamax Pokémon stays in Max Battles for the rest of the week: a Mon–Sun bar per Max Monday.
+let weekBars = []; // set by render()
+// Lane order: a legendary Max Monday week bar on top, other bars by start, other Max Monday week bars at the bottom.
+const barRank = (ev) => (!ev.of ? 1 : ev.pokemon.some((p) => classOf(p)) ? 0 : 2);
+function maxWeekBars() {
+  return visibleEvents().filter((ev) => ev.type === 'max-mondays' && (ev.pokemon || []).length).map((ev) => {
+    const day = homeDay(evRange(ev)[0]);
+    return { ...ev, of: ev, title: `${ev.pokemon.map((p) => p.name).join(', ')}: Dynamax all week`,
+      tz: HOME.tz, start: `${day}T00:00`, end: `${addDays(day, 7 - weekday(day))}T00:00` };
+  });
+}
 function renderWeek(monday, month, todayKey) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   // Bars: weekly rotations, and multi-day in-game events (type "event") up to SEASON_DAYS long.
   const lanes = [];
   const bars = [];
   if (prefs.bars) {
-    const evs = visibleEvents().filter((ev) => {
+    const evs = [...visibleEvents().filter((ev) => {
       const t = tierOf(ev);
       const span = spanDays(ev);
-      return (t === 'weekly' || (t === 'minor' && ev.type === 'event' && !isOverseas(ev) && span > 1.5 && span <= SEASON_DAYS))
-        && days.some((d) => onDay(ev, d));
-    }).sort((a, b) => evRange(a)[0] - evRange(b)[0]);
+      return t === 'weekly' || (t === 'minor' && ev.type === 'event' && !isOverseas(ev) && span > 1.5 && span <= SEASON_DAYS);
+    }), ...weekBars].filter((ev) => days.some((d) => onDay(ev, d)))
+      .sort((a, b) => barRank(a) - barRank(b) || evRange(a)[0] - evRange(b)[0]);
+    // Max Monday week bars always get a lane: other bars leave one free for each week bar still to come.
+    let weekLeft = evs.filter((ev) => ev.of).length;
     for (const ev of evs) {
+      if (ev.of) weekLeft--;
       const a = days.findIndex((d) => onDay(ev, d));
       let b = a;
       while (b + 1 < 7 && onDay(ev, days[b + 1])) b++;
       let lane = lanes.findIndex((end) => end < a);
-      if (lane < 0) { if (lanes.length >= MAX_LANES) continue; lane = lanes.length; lanes.push(-1); }
+      if (lane < 0) { if (lanes.length >= MAX_LANES - weekLeft) continue; lane = lanes.length; lanes.push(-1); }
       lanes[lane] = b;
       bars.push({ ev, a, b, lane });
     }
@@ -749,13 +840,15 @@ function renderWeek(monday, month, todayKey) {
   days.forEach((d, i) => week.append(renderCell(d, i, month, todayKey)));
   for (const { ev, a, b, lane } of bars) {
     const act = (ev.pokemon || []).find((p) => RAID_ACTS.has(p.act))?.act || TYPE_ACT[ev.type] || 'event';
-    const color = tierOf(ev) === 'weekly' ? (ACTIVITIES[act] || ACTIVITIES.event).color : 'var(--muted)';
+    const color = tierOf(ev) === 'weekly' || ev.of ? (ACTIVITIES[act] || ACTIVITIES.event).color : 'var(--muted)';
     const startsHere = onDay(ev, days[a]) && homeDay(evRange(ev)[0]) === days[a];
-    week.append(el('button', {
+    const btn = el('button', {
       class: `bar${startsHere ? ' starts' : ''}${homeDay(evRange(ev)[1] - 1) === days[b] ? ' ends' : ''}`,
       style: `grid-column:${a + 1} / ${b + 2};grid-row:${lane + 2};--bar:${color}`,
-      title: `${ev.title}\n${whenText(ev)}`, onclick: () => openEditor(ev),
-    }, el('span', { text: ev.title })));
+      'aria-label': `${ev.title}, ${barWhen(ev)}`, onclick: () => openEditor(ev.of || ev),
+    }, el('span', { text: ev.title }));
+    BAR_TIP.set(btn, ev);
+    week.append(btn);
   }
   return week;
 }
@@ -765,18 +858,19 @@ function renderCell(key, col, month, todayKey) {
   const max = 6;
   const cls = ['cell', col >= 5 && 'weekend', key.slice(0, 7) !== month && 'other', key === todayKey && 'today', key === selected && 'selected',
     info.rest ? 'rest' : info.super.length ? 'super' : info.overseas.length ? 'overseas' : info.mundane && 'mundane'];
-  const majorNames = info.by.major.filter((ev) => !isOverseas(ev)).map((ev) => `${fmtTime(evRange(ev)[0])} ${ev.title}`);
+  const majors = info.by.major.filter((ev) => !isOverseas(ev));
+  const majorNames = majors.map((ev, i) => [i ? ' · ' : '', evTip(el('span', { text: `${fmtTime(evRange(ev)[0])} ${ev.title}` }), ev)]);
   return el('button', {
     class: cls.filter(Boolean).join(' '), style: `grid-column:${col + 1}`, 'data-day': key,
-    'aria-label': `${key}${info.rest ? ', rest day' : ''}`, onclick: () => openDay(key),
+    'aria-label': `${key}${info.rest ? ', rest day' : ''}`, onclick: () => (selected ? $('dayClose').click() : openDay(key)),
   },
   el('span', { class: 'date' }, el('span', { text: +key.slice(8) }),
     info.rest ? el('span', { class: 'badge', text: 'Rest' }) : null),
-  info.super.map((ev) => el('span', { class: 'supername', text: ev.title })),
-  info.overseas.map((ev) => el('span', { class: 'overseasname', title: whenText(ev), text: `✈ ${ev.title}` })),
+  info.super.map((ev) => evTip(el('span', { class: 'supername', text: ev.title }), ev)),
+  info.overseas.map((ev) => evTip(el('span', { class: 'overseasname', text: `✈ ${ev.title}` }), ev)),
   el('span', { class: 'mons' }, info.main.slice(0, max).map(({ p, ev }) => monIcon(p, ev)),
     info.main.length > max ? el('span', { class: 'more', text: `+${info.main.length - max}` }) : null),
-  majorNames.length ? el('span', { class: 'evcount', title: majorNames.join('\n'), text: majorNames.join(' · ') }) : null,
+  majorNames.length ? el('span', { class: 'evcount' }, majorNames.flat()) : null,
   info.corner.length ? el('span', { class: 'corner' }, info.corner.slice(0, 5).map(({ p, ev }) => monIcon(p, ev, 'small'))) : null);
 }
 
@@ -804,10 +898,10 @@ function renderRunning(first, nextMonth) {
   for (const ev of long) {
     const [s, e] = evRange(ev);
     const stars = (ev.pokemon || []).filter(isValuable);
-    box.append(el('button', { class: 'chip', title: ev.title, onclick: () => openEditor(ev) },
+    box.append(evTip(el('button', { class: 'chip', onclick: () => openEditor(ev) },
       pin(TYPE_ACT[ev.type] || stars[0]?.act || 'event'), el('span', { text: ev.title }),
       el('span', { class: 'when', text: `${fmtDate(s)}–${fmtDate(e)}` }),
-      stars.length ? el('span', { class: 'mons' }, stars.slice(0, 4).map((p) => monIcon(p, ev, 'tiny'))) : null));
+      stars.length ? el('span', { class: 'mons' }, stars.slice(0, 4).map((p) => monIcon(p, ev, 'tiny'))) : null), ev));
   }
 }
 
@@ -819,14 +913,36 @@ function tipContent({ p, ev }) {
   const rows = [];
   rows.push(el('div', { class: 'tip-name' }, el('b', { text: p.name }), p.shiny ? el('span', { class: 'tip-shiny', text: '✦ shiny' }) : null));
   rows.push(el('div', { class: 'tip-act' }, pin(p.act), (ACTIVITIES[p.act] || ACTIVITIES.event).label, cls ? ` · ${CLASS_NAME[cls]}` : ''));
+  const types = typesOf(p);
+  if (types.length) {
+    rows.push(el('div', { class: 'tip-types' }, types.map((t) => el('span', { class: `type${LIGHT_TYPES.has(t) ? ' light' : ''}`,
+      style: `--type:${TYPE_COLORS[t] || '#888'}`, text: t }))));
+  }
+  if (tempKey(p).startsWith('MEGA')) {
+    const sm = superMaxInfo(p, ev);
+    const on = sm.from && fmtDate(dayStart(sm.from));
+    rows.push(el('div', { class: `tip-supermax${sm.state === 'yes' || sm.state === 'during' ? ' yes' : ''}`, text: {
+      yes: `Can reach Super Max (Mega Level 4)${sm.move ? `: extra Charged Attack ${sm.move}` : on ? `, unlocked from ${on}` : ''}`,
+      during: `Super Max (Mega Level 4) unlocks ${on}, during this event`,
+      later: `Super Max (Mega Level 4) unlocks ${on}`,
+      no: 'Mega Level 4 (Super Max): not available',
+    }[sm.state] }));
+  }
+  const bonus = ev && (ev.bonus || ev.ld?.bonus);
+  if (bonus) rows.push(el('div', { class: 'tip-bonus', text: `Bonus: ${bonus}` }));
   if (h) {
     rows.push(el('div', { class: 'tip-cp' }, el('span', { text: 'Hundo catch CP' }),
       el('b', { text: String(h.cp20) }), h.cp25 ? el('span', { class: 'muted', text: `· weather boosted ${h.cp25}` }) : null));
   }
+  if (p.debut) rows.push(el('div', { class: 'tip-debut', text: p.debut === 'shiny' ? 'Shiny debut: first time it can be shiny' : 'Pokémon GO debut' }));
   if (p.bg) {
     rows.push(el('div', { class: 'tip-bg', text: ev && isOverseas(ev)
       ? 'Special background mentioned, but usually only for in-person catches, not remote raids'
       : 'Special background available (per Leek Duck)' }));
+  }
+  if (p.lbg) {
+    rows.push(el('div', { class: 'tip-lbg' }, globePin(p.lbg), el('span', { text: `${p.lbg} Location Background: `
+      + `${p.lbgTicket ? 'ticket holders only, from' : 'only from'} in-person raids and Max Battles; not for remote participants` })));
   }
   if (REGIONS[p.region]) {
     const R = REGIONS[p.region];
@@ -853,11 +969,58 @@ function remoteNote(p, ev) {
   if (RAID_ACTS.has(p.act)) return 'Overseas raid: Remote Raid Pass needed';
   return `Overseas: in person in ${where} only`;
 }
+// Event bar tooltip: the event, its times, its Pokémon (raid bosses and valuable ones first), bonus and note.
+const BAR_TIP = new WeakMap(); // bar element -> event (a Max Monday week bar carries the real event in `of`)
+const barWhen = (ev) => (ev.of ? `${fmtDate(evRange(ev)[0])} – ${fmtDate(evRange(ev)[1] - 1)} (Mon–Sun)` : whenText(ev));
+const TIER_LABEL = { super: 'super major', major: 'major', weekly: 'weekly', minor: 'minor' };
+function barTipContent(ev) {
+  const real = ev.of || ev;
+  // A Max Monday week bar shows its Max Monday icon's tooltip, plus the week it stays in Max Battles.
+  if (ev.of) {
+    const box = tipContent({ p: real.pokemon[0], ev: real });
+    box.querySelector('.tip-text').append(el('div', { class: 'tip-bonus', text: `In Max Battles all week: ${barWhen(ev)}` }));
+    return box;
+  }
+  const act = (ev.pokemon || []).find((p) => RAID_ACTS.has(p.act))?.act || TYPE_ACT[real.type] || 'event';
+  const rows = [el('div', { class: 'tip-name' }, pin(act), el('b', { text: ev.title }),
+    el('span', { class: 'tag', text: ev.of ? 'Max Battles' : TIER_LABEL[tierOf(real)] }))];
+  rows.push(el('div', { class: 'muted', text: barWhen(ev) }));
+  if (ev.of) rows.push(el('div', { text: `${real.title}: ${whenText(real)}. Its Dynamax Pokémon stays in Max Battles until Sunday.` }));
+  if (isOverseas(real)) rows.push(el('div', { class: 'tip-remote', text: `Overseas: ${cityOf(real)?.name || ''}` }));
+  const mons = [...eventPokemon(ev)].sort((a, b) => monRank(b) - monRank(a));
+  if (mons.length) {
+    rows.push(el('div', { class: 'tipev-mons' }, mons.slice(0, 8).map((p) => el('div', { class: 'tipev-mon' },
+      pin(p.act), el('span', { text: `${p.name}${p.shiny ? ' ✦' : ''}` }), p.debut ? debutBadge(p) : null,
+      p.lbg ? globePin(p.lbg) : null,
+      typesOf(p).map((t) => el('span', { class: `type${LIGHT_TYPES.has(t) ? ' light' : ''}`, style: `--type:${TYPE_COLORS[t] || '#888'}`, text: t })),
+      classOf(p) ? el('span', { class: 'muted', text: CLASS_NAME[classOf(p)] }) : null)),
+    mons.length > 8 ? el('div', { class: 'muted', text: `+${mons.length - 8} more in the day panel` }) : null));
+  }
+  const bonus = real.bonus || real.ld?.bonus;
+  if (bonus) rows.push(el('div', { class: 'tip-bonus', text: `Bonus: ${bonus}` }));
+  if (real.note) rows.push(el('div', { class: 'tip-comment', text: real.note }));
+  if (real.from) rows.push(el('div', { class: 'muted', text: `Suggested by ${real.from}` }));
+  // Big pictures of the top (up to 3) Pokémon on top, as in the Pokémon tooltip.
+  const top = mons.slice(0, 3).filter((p) => iconUrls(p).length);
+  const pics = top.map((p) => {
+    const img = el('img', { alt: p.name, class: top.length > 1 ? 'mid' : '' });
+    trimmed(iconUrls(p)).then((u) => { if (u) img.src = u; else img.remove(); });
+    return img;
+  });
+  return el('div', { class: 'tip-bar' }, pics.length ? el('div', { class: 'tipev-pics' }, pics) : null,
+    el('div', { class: 'tip-text' }, rows));
+}
+// Event names on the calendar (super / overseas names, major-event lines, "Running this month" chips): their day-panel box.
+const EV_TIP = new WeakMap(); // element -> event
+function evTip(node, ev) { node.classList.add('evtip'); EV_TIP.set(node, ev); return node; }
 function showTip(target, x, y) {
   const info = TIP.get(target);
-  if (!info) return;
+  const barEv = !info && BAR_TIP.get(target);
+  const nameEv = !info && !barEv && EV_TIP.get(target);
+  if (!info && !barEv && !nameEv) return;
   const tip = $('tip');
-  tip.replaceChildren(tipContent(info));
+  tip.classList.toggle('tip-card', !!nameEv);
+  tip.replaceChildren(info ? tipContent(info) : barEv ? barTipContent(barEv) : evCard(nameEv, true));
   tip.hidden = false;
   const r = tip.getBoundingClientRect();
   const left = Math.min(x + 14, window.innerWidth - r.width - 8);
@@ -866,7 +1029,7 @@ function showTip(target, x, y) {
   tip.style.top = `${Math.max(8, top)}px`;
 }
 document.addEventListener('mouseover', (e) => {
-  const m = e.target.closest?.('.mon');
+  const m = e.target.closest?.('.mon, .bar, .evtip');
   if (m) showTip(m, e.clientX, e.clientY); else $('tip').hidden = true;
 });
 document.addEventListener('scroll', () => { $('tip').hidden = true; }, true);
@@ -899,13 +1062,17 @@ function renderDay() {
   box.replaceChildren();
   const order = { super: 0, major: 1, weekly: 2, minor: 3 };
   const evs = data.events.filter((ev) => onDay(ev, key))
-    .sort((a, b) => order[tierOf(a)] - order[tierOf(b)] || evRange(a)[0] - evRange(b)[0]);
+    .sort((a, b) => order[tierOf(a)] - order[tierOf(b)] || mineFirst(a, b) || evRange(a)[0] - evRange(b)[0]);
   if (!evs.length) box.append(el('p', { class: 'muted', text: 'No events on this day.' }));
-  for (const ev of evs) {
-    const tier = tierOf(ev);
-    box.append(el('div', { class: `evcard tier-${tier}${isOverseas(ev) ? ' is-overseas' : ''}${ev.hidden ? ' hidden-ev' : ''}` },
+  for (const ev of evs) box.append(evCard(ev, false));
+}
+// An event's box: in the day panel, and (`inTip`, without buttons or links) as the tooltip of its name on the calendar.
+function evCard(ev, inTip) {
+  const tier = tierOf(ev);
+  const bonus = ev.bonus || ev.ld?.bonus;
+  return el('div', { class: `evcard tier-${tier}${isOverseas(ev) ? ' is-overseas' : ''}${ev.hidden ? ' hidden-ev' : ''}` },
       el('div', { class: 't' }, pin(TYPE_ACT[ev.type] || 'event'), el('b', { text: ev.title }),
-        el('span', { class: 'tag', text: { super: 'super major', major: 'major', weekly: 'weekly', minor: 'minor' }[tier] }),
+        el('span', { class: 'tag', text: TIER_LABEL[tier] }),
         isOverseas(ev) ? el('span', { class: 'tag remote', text: 'remote' }) : null,
         ev.source === 'user' ? el('span', { class: 'tag', text: STATIC && ev.published && !ev.local ? 'owner' : 'mine' })
           : ev.edited?.length ? el('span', { class: 'tag', text: 'edited' }) : null,
@@ -913,24 +1080,24 @@ function renderDay() {
         ev.from ? el('span', { class: 'tag', text: `from ${ev.from}` }) : null,
         ev.hidden ? el('span', { class: 'tag', text: 'hidden' }) : null),
       el('div', { class: 'when', text: whenText(ev) }),
-      ev.pokemon?.length ? eventMons(ev) : null,
+      ev.pokemon?.length ? eventMons(ev, inTip) : null,
       ...(ev.pokemon || []).filter((p) => REGIONS[p.region] && !HOME_REGIONS.has(p.region)).map((p) => {
         const w = regionWindows(ev, p.region);
         return el('div', { class: 'region-line' }, lockPin(p.region),
           `${p.name} (${REGIONS[p.region].label})${w ? `: ${fmtDayTime(w.s)} – ${fmtDayTime(w.e)} ${HOME.label}` : ''}`);
       }),
-      ev.note ? el('div', { text: ev.note }) : null,
-      el('div', { class: 'links' },
+      bonus ? el('div', { class: 'tip-bonus', text: `Bonus: ${bonus}` }) : null,
+      ev.note ? el('div', { class: 'evnote', text: ev.note }) : null,
+      inTip ? null : el('div', { class: 'links' },
         el('button', { class: 'btn', disabled: !canEdit(), onclick: () => openEditor(ev), text: 'Edit' }),
-        ev.url ? el('a', { href: ev.url, target: '_blank', rel: 'noopener', text: 'Leek Duck page' }) : null)));
-  }
+        ev.url ? el('a', { href: ev.url, target: '_blank', rel: 'noopener', text: 'Info page' }) : null));
 }
 // Event card icons: raid bosses and valuable ones first; long lists (season spawns) folded after 12.
-function eventMons(ev) {
-  const rank = (p) => (p.mine ? 3 : 0) + (RAID_ACTS.has(p.act) ? 2 : 0) + (isValuable(p) ? 1 : 0);
-  const list = [...ev.pokemon].sort((a, b) => rank(b) - rank(a));
+function eventMons(ev, inTip = false) {
+  const list = [...eventPokemon(ev)].sort((a, b) => monRank(b) - monRank(a));
   const box = el('div', { class: 'mons' }, list.slice(0, 12).map((p) => monIcon(p, ev)));
-  if (list.length > 12) {
+  if (list.length > 12 && inTip) box.append(el('span', { class: 'more', text: `+${list.length - 12} more` }));
+  else if (list.length > 12) {
     box.append(el('button', { class: 'btn more-btn', type: 'button', text: `+${list.length - 12} more`, onclick: (e) => {
       e.target.replaceWith(...list.slice(12).map((p) => monIcon(p, ev)));
     } }));
@@ -1132,9 +1299,14 @@ $('refresh').onclick = async () => {
 $('publish').onclick = async () => {
   try {
     const r = await api('POST', '/api/publish');
-    $('status').textContent = `Published ${r.events} events and ${r.days} days to ${r.file}. Commit and push it to update the public site.`;
-    openPublic();
-  } catch (e) { $('status').textContent = `Could not publish: ${e.message}`; }
+    const msg = `Published ${r.events} events and ${r.days} days to ${r.file}. Commit and push it to update the public site.`;
+    $('status').textContent = msg;
+    await openPublic();
+    $('pubStatus').append(el('div', { class: 'pub-ok', text: msg }));
+  } catch (e) {
+    $('status').textContent = `Could not publish: ${e.message}`;
+    $('pubStatus').replaceChildren(el('span', { class: 'pub-warn', text: `Could not publish: ${e.message}` }));
+  }
 };
 $('pubBtn').onclick = openPublic;
 $('pubClose').onclick = () => $('pubDlg').close();
@@ -1155,6 +1327,9 @@ $('helpPins').append(...Object.entries(ACTIVITIES).map(([k, a]) => el('span', { 
 $('helpExtras').append(
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, sparkle()), 'shiny available (top-right)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'bg-key', text: 'BG' }), 'special background (bottom-left)'),
+  el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, globePin('event location')),
+    'Location Background: a photo of the event city, in-person raids / Max Battles only (left)'),
+  el('span', { class: 'help-pin' }, debutBadge({ debut: 'new' }), 'Pokémon GO debut (gold: shiny debut)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, lockPin('emea')), 'region-locked, another region (top-left)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, lockPin('apac')), 'region-locked, your region'));
 $('helpBtn').onclick = () => $('help').showModal();

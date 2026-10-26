@@ -25,7 +25,7 @@ To see at a glance which valuable Pokémon are featured on each day of a month, 
 | POST | `/api/publish` | writes `public/public.json` from the items ticked public → counts |
 | GET | `/icon?u=<cdn.leekduck.com url>` | image, cached in `data/icons/` |
 
-Writes must be `Content-Type: application/json`, which forces a CORS preflight. Only Origin `null` (the page opened from disk), localhost, or no Origin are allowed. Together these stop other websites from changing the data through the browser.
+Writes must be `Content-Type: application/json`, which forces a CORS preflight. The page's `api()` sends `{}` for body-less writes (Publish, Check Leek Duck); without that they got 415, which broke both buttons until 2026-10-26. Only Origin `null` (the page opened from disk), localhost, or no Origin are allowed. Together these stop other websites from changing the data through the browser.
 
 ## Store
 
@@ -52,7 +52,13 @@ A Pokémon entry is `{name, dex, icon, act, shiny, bg, region, fromTitle?}`, plu
 - **Title-derived Pokémon:** pages with no Pokémon list (Raid Hour, some Max Monday pages) take names from the title, e.g. "Cresselia and Darkrai Raid Hour". Only names that `public/pokedex.js` knows as species are kept. These entries are flagged `fromTitle`. Their shiny flag is copied from an overlapping event that lists the same dex and form (`shareShiny()`), such as the 5★ rotation behind a Raid Hour.
 - **Special backgrounds** appear only in prose. Sentences containing "special background" are kept (`bgText`), and a Pokémon gets `bg` when its name appears there and its activity is a raid, Max Battle or research catch. "Dynamax Dialga" counts only for the Dynamax one.
 - **Region locks** (`regionOf()`) also come from prose. A line like "Mesprit: Europe, the Middle East, Africa, and India." or "… in the Western Hemisphere" sets `region` to `apac`, `emea`, `americas`, `east` or `west`.
-- **`SCRAPE_VERSION`:** bump it when parsing changes, so every stored detail page is fetched again once.
+- **Sub-sections:** a main section header is `<h2 id class="event-section-header">`. A plain `<h2 id>` inside it is a sub-section, named `main/sub` (e.g. `raids/max-battles`, `raids/five-star-raids`), so a Max Battles list under "Raids" is classed `dmax` / `gmax`, not `raid`. Before SCRAPE_VERSION 7 they were folded into the main section.
+- **Prose** for the rules below (`parseDetail().sentences`) leaves out Pokémon lists and ends a sentence at every heading, paragraph and list item, since headings have no full stop.
+- **`mentions(text, name, act)`** decides whether prose names a Pokémon. "Dynamax X" / "Gigantamax X" count only for that activity. "Hisuian X" (or another regional form) counts only for the regional form. The species word is found in the pokédex ("Unown S" → Unown, "Modern Jacket Machamp" → Machamp). With `needForm`, a bracketed form must be named too ("Minior (Green Core)").
+- **Debuts** (`debut: 'new' | 'shiny'`): a Pokémon listed in a section whose id contains "debut", or named in a debut clause. Debut clauses come from sentences with "debut", minus "will debut", minus "See …" pointers to another event, and minus "debuts during the Orionids" when the title isn't that shower. Sentences are split at ", and" and ";", and only the parts that mention a debut are kept. "Shiny Greavard makes its debut" gives `'shiny'`.
+- **Location Backgrounds** (`lbg: place`, `lbgTicket`): sentences naming a "Location Background" (a photo of the event's city, unlike the clip-art Special Background). The place is read from "a Sendai Location Background", and `lbgTicket` is set when the sentence says ticket holders. Only raid / Max Battle / research catches get it. The tooltip says it's in-person only, never for remote players.
+- **Minior Showers** (`dropUndebuted()`): the page lists all seven cores, but each shower debuts one, named in prose ("Green Core Minior debuts during the Orionids."). Only cores debuting in the event's own shower (matched by the title) are kept; while the colour is unannounced, only Meteor Form remains.
+- **`SCRAPE_VERSION`:** bump it when parsing changes, so every stored detail page is fetched again once. The server checks Leek Duck at startup when the last check is over 6 h old, or when any unfinished stored event was read by an older version. Before 2026-10-26 it only checked the age, so a restart after a bump did nothing until the next 6-hourly check.
 
 ## Activities (pins)
 
@@ -61,7 +67,7 @@ A Pokémon entry is `{name, dex, icon, act, shiny, bg, region, fromTitle?}`, plu
 1. `gmax` / `dmax`: the section id says gigantamax / dynamax; the name starts with Gigantamax / Dynamax; a max-battle section; or, outside a raid section, the title or type is Max Mondays, Max Battles or Dynamax.
 2. `supermega` / `mega`: the name starts with "Mega " or "Primal "; the title decides Super Mega.
 3. `shadow`: the name starts with "Shadow ", or the raid section of a shadow event.
-4. `cd`: Community Day.
+4. `cd`: Community Day, except its research / ticket / web-store sections (evolutions listed there become `research`).
 5. `spotlight`: Spotlight Hour.
 6. `hatch`: the title says hatch, or an egg section.
 7. `raid`: a raid section, or a raid-type event.
@@ -134,13 +140,15 @@ The same page runs in two modes. `STATIC` in `calendar.js` is true unless the pa
   - *weekly*: raid-battles rotations, and multi-day non-"event" types with raid bosses. Small icons in the bottom-right corner, plus a bar.
   - *minor*: everything else, shown in the day panel only. Multi-day `event`-type ones also get a bar.
 
-  Super and overseas events show only raid bosses, valuable and user-added Pokémon on the cell; their full spawn lists stay in the day panel.
+  Super and overseas events show only raid bosses, Community Day stars (`cd`), valuable and user-added Pokémon on the cell; their full spawn lists stay in the day panel.
+
+  Within a tier, the user's own events come first (`mineFirst`), on the cell and in the day panel.
 - **Day backgrounds**, in order of precedence:
   1. rest (pale green, the user's flag);
   2. super (orange);
   3. overseas (periwinkle);
   4. mundane (pale grey): no super or major event, no user targets, and no weekly Shadow legendary or starred Pokémon.
-- **Grid:** weeks start on Monday. Each week is a 7-column CSS grid. Cells span all its rows, and bars sit in lanes 2… along the bottom (at most 3 lanes, set by `--lanes`). Cells pad their bottom by the lane height. A cell shows up to 6 big icons, then "+n", plus at most 5 small corner icons. Sat/Sun cells get a 2px `--weekend` outline, and their column headers are bold.
+- **Grid:** weeks start on Monday. Each week is a 7-column CSS grid. Cells span all its rows, and bars sit in lanes 2… along the bottom (at most 4 lanes, set by `--lanes`). Each Max Monday with a Pokémon also gets a Monday–Sunday bar in the Dynamax colour (`maxWeekBars()`), because its Dynamax Pokémon stays in Max Battles all week; clicking it edits the Max Monday event. It's the lowest-priority bar, in the bottom lane, unless its Pokémon is legendary / mythical / Ultra Beast, which puts it in the top lane (`barRank()`). Either way it always gets a lane: other bars leave one free for each week bar still to be placed. Cells pad their bottom by the lane height. A cell shows up to 6 big icons, then "+n", plus at most 5 small corner icons. Sat/Sun cells get a 2px `--weekend` outline, and their column headers are bold.
 - **Season events:** events longer than 14 days (`SEASON_DAYS`) never put Pokémon on cells. They are listed in the collapsed "Running this month" section, with their valuable icons.
 - **Icons:**
   - each icon tries a chain of candidates until one loads (`cdnIcons()`):
@@ -151,9 +159,15 @@ The same page runs in two modes. `STATIC` in `calendar.js` is true unless the pa
 
     The server remembers CDN 404s for a day, so the chain doesn't keep asking. The static site ships every featured icon, base sprites for featured species, and all legendary / mythical / Ultra Beast base sprites.
   - each icon is cropped to its visible pixels on a canvas, then cached as a data URL, because Leek Duck sprites have uneven padding that made small species tiny. This needs the icon proxy's CORS header (or same-origin icons on the static site);
-  - the pin goes bottom-right, a ✦ sparkle top-right for shiny, "BG" bottom-left for a special background, and a padlock top-left for a region lock;
+  - the pin goes bottom-right, a ✦ sparkle top-right for shiny, "BG" bottom-left for a special background, a padlock top-left for a region lock, a wireframe globe on the left edge for a Location Background (`globePin()`), and a "NEW" tag top-centre for a debut (gold for a shiny debut). On super / overseas day cells, debuts are shown next to raid bosses and valuable Pokémon, sorted right after the user's own. A Pokémon listed both in a feature blurb (`event`) and with a real activity is shown once, as the latter (`eventPokemon()`). The cell, event boxes and both tooltips all use that rule. Event boxes and bar tooltips order Pokémon with `monRank()`: the user's own, then raid bosses, debuts and valuable ones.
   - user-added Pokémon (`mine`) can be starred, which shows a two-arc rainbow swirl adapted from the Cluedo current-player token, and can carry a tooltip comment.
 - **Rich tooltip:** a single floating `#tip`. It shows a 96px icon, name, shiny, activity, class, and the hundo catch CP. That's level 20, plus level 25 weather boosted, except for Max Battles, which show level 20 only. The CP is computed from the form's base stats in `pokedex.js`, which come from pogo-stats-comp's `data.js`. The tooltip also shows the event and its times, remote notes, who suggested it, and the user's comment.
+- **Event name tooltip:** event names on the calendar show the event's day-panel box (`evCard(ev, true)`, without the Edit button or link) as a tooltip (`EV_TIP`, class `evtip`). That covers super-day and ✈ overseas names, each major-event line in a cell, and the "Running this month" chips. The box keeps its tier colours. The day panel builds its boxes with the same `evCard()`, and both now also show the Spotlight bonus.
+- **Event bar tooltip:** bars use the same floating `#tip` (`BAR_TIP`, `barTipContent()`), not a plain `title`. On top are big cropped pictures of the first (up to 3) Pokémon: 96 px for one, 72 px for two or three. A Max Monday week bar instead shows exactly its Max Monday icon's tooltip, plus "In Max Battles all week: <Mon> – <Sun>". For other bars, below the pictures come the event's pin, title, tier and times, the overseas city, up to 8 Pokémon (raid bosses and valuable ones first) with pin, types, shiny and class, then the bonus, the note and who suggested it. There's no "click" hint: the tooltip vanishes when the mouse leaves the bar, so it would only mislead (clicking the bar itself opens the editor).
+- **Types** come from `pokedex.js`: each form carries its types (from pogo-stats-comp's `data.js`), and each species its Mega / Primal type overrides (game master `tempEvoOverrides`, keys `MEGA`, `MEGA_X`, `MEGA_Y`, `PRIMAL`). Chips use the standard Pokémon GO type colours (`TYPE_COLORS`). The user's reference for these colours, `data/PoGo Mega 4s.pdf`, couldn't be rendered here, so the standard palette was used.
+- **Super Max Level (Mega Level 4):** `SUPER_MAX` in `calendar.js` lists the Megas that can reach it, with their extra Charged Attack, from the fandom wiki's "List of Pokémon that can reach Super Max Level" (checked 2026-10-26). Update it by hand when new ones are added. Every Mega's tooltip says whether it can.
+  - Unlocks are dated: `SUPER_MAX_FROM` holds announced days (Mega Sableye: 2026-11-01), and a Super Mega Raid Day unlocks its featured Mega from that SGT day on, inclusive (e.g. Chandelure, 31 Oct). `superMaxInfo()` compares the unlock day with the event's window: unlocked before it starts, "unlocks … during this event", or "unlocks …" later. Day targets with no event use the current time.
+- **Spotlight Hour bonus:** the scraper reads "the special bonus is …" from the page prose into the Leek Duck copy's `bonus` (`ld.bonus`, or `bonus` on the static site's records). The tooltip shows it as "Bonus: …" for any event that has one.
 - **Region-locked Pokémon:** a padlock sits top-left on the icon, teal for the home region (`HOME_REGIONS`: apac, east) and orange for another region.
   - For a local-time event, `regionWindows()` converts the event's wall-clock window in each sample place of `REGIONS[...].zones` into SGT. The tooltip shows the first-start to last-end span plus each place, and the day panel adds one line per locked Pokémon.
   - Example: Dynamax Mesprit (EMEA), 2–5 pm local, is live Sat 4:30 pm (India) to Sun 2:00 am SGT (Cape Verde).
@@ -162,4 +176,5 @@ The same page runs in two modes. `STATIC` in `calendar.js` is true unless the pa
 - **Help and welcome:** a **?** dialog explains the calendar, drawing the real pins and marks. On the public site, a one-time welcome note (localStorage `pogoCalendarWelcomed`) says visitors' changes stay in their browser and mentions Export.
 - **Preferences:** month, event bars, and hidden activities are kept in localStorage (`pogoCalendarPrefs`). `#YYYY-MM` in the URL opens that month.
 - **No browser dialogs:** deleting or undoing needs a second click on the same button.
+- **Day panel:** while it's open, clicking any date closes it (the next click opens that day). Its header with × stays pinned at the top while the panel scrolls. The event link says "Info page", because it isn't always Leek Duck's.
 - **Speed:** time-zone conversion keeps one `Intl.DateTimeFormat` per zone. It caches offsets per zone and UTC half hour (offsets only change on half-hour boundaries), and display formatters per zone and options. `evRange()` is memoized per event object, keyed by its times, title and zone. Opening a day only moves the `selected` class and fills the panel. Measured on November 2026 in headless Edge: a full render went from 4.8 s to 91 ms, and a day click from 4.6 s to 5 ms.

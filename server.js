@@ -8,7 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { Store } = require('./lib/store');
-const { scrape } = require('./lib/scrape');
+const { scrape, SCRAPE_VERSION } = require('./lib/scrape');
 const { iconFile } = require('./lib/iconfile');
 
 const PORT = +process.env.PORT || 8642;
@@ -137,6 +137,9 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   log(`PoGo Calendar on http://localhost:${PORT}/  (data: ${store.file})`);
   if (process.env.NO_REFRESH) return;
-  if (Date.now() - store.data.lastRefresh > REFRESH_MS) refresh();
+  // Also check now when an unfinished event was read by an older scraper (SCRAPE_VERSION bumped since).
+  const outdated = Object.values(store.data.events).some((ev) => ev.ld && ev.ld.v !== SCRAPE_VERSION
+    && !(Date.parse(ev.ld.end) < Date.now()));
+  if (Date.now() - store.data.lastRefresh > REFRESH_MS || outdated) refresh();
   setInterval(refresh, REFRESH_MS).unref?.();
 });

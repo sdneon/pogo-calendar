@@ -1,5 +1,24 @@
 {
- "publishedAt": 1792597741725,
- "events": {},
+ "publishedAt": 1792983607507,
+ "events": {
+  "u-0bfb1bf4-f735-4778-975d-d19d7f154f76": {
+   "id": "u-0bfb1bf4-f735-4778-975d-d19d7f154f76",
+   "source": "user",
+   "edited": [],
+   "note": "Paid, pre-registration only event, with free public entry to Pokémon Festival Zone.\n@ Stadium Roar, The Kallang",
+   "hidden": false,
+   "pokemon": [],
+   "typeLabel": "",
+   "image": "",
+   "title": "Pokémon RUN 30 Singapore Edition",
+   "type": "event",
+   "start": "2026-11-07T07:00",
+   "end": "2026-11-08T14:00",
+   "url": "https://www.thekallang.com.sg/en/things-to-do/events/pokemon-run-30-singapore-edition.html",
+   "tier": "super",
+   "tz": "",
+   "from": "Yun"
+  }
+ },
  "days": {}
 }

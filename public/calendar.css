@@ -88,6 +88,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .sw-super { background: var(--super); } .sw-overseas { background: var(--overseas); }
 .sw-rest { background: var(--rest); } .sw-mundane { background: var(--mundane); }
 .spark-key { color: #e0a800; font-weight: 700; }
+.new-key { font: 700 .6rem var(--font-display); padding: 0 3px; border-radius: 3px; background: #d6336c; color: #fff; }
+.globe-key { color: #2c68b3; }
 .bg-key { font: 700 .62rem var(--font-display); padding: 0 3px; border-radius: 3px; background: #1d8f8a; color: #fff; }
 
 /* Activity pin: a small coloured disc with a glyph; colour comes from --pin set inline per activity. */
@@ -170,6 +172,24 @@ main { margin-top: 12px; overflow-x: auto; }
   border-radius: 3px; background: #1d8f8a; color: #fff; box-shadow: 0 0 0 1.5px var(--surface);
 }
 .mon.small .bgpin { font-size: 5px; padding: 1px; }
+/* Location Background: wireframe globe on the left edge (a photo of the place, unlike the clip-art "BG"). */
+.globe { width: 12px; height: 12px; fill: none; stroke: #2c68b3; stroke-width: 1.1; }
+.globe path:first-child { fill: #fff; }
+.mon .globe { position: absolute; left: -3px; top: calc(50% - 6px); z-index: 2; }
+.mon.small .globe { width: 8px; height: 8px; left: -2px; top: calc(50% - 4px); }
+.mon.tiny .globe, .mon.tiny .newpin { display: none; }
+/* Debut: "NEW" tag top-centre (gold for a shiny debut). */
+.newpin {
+  position: absolute; top: -5px; left: 50%; transform: translateX(-50%); z-index: 3; font: 700 7px/1 var(--font-display);
+  padding: 1px 3px; border-radius: 3px; background: #d6336c; color: #fff; box-shadow: 0 0 0 1.5px var(--surface); letter-spacing: .03em;
+}
+.newpin.shiny { background: #c98a00; }
+.mon.small .newpin { font-size: 5px; padding: 1px 2px; top: -3px; }
+.tipev-mon .newpin, .help-pin .newpin { position: static; transform: none; }
+.tipev-mon .globe, .tip-lbg .globe, .help-mark .globe { position: static; flex: none; }
+.tip-debut { color: #d6336c; font-weight: 700; }
+.tip-lbg { display: flex; gap: 6px; align-items: flex-start; color: #2c68b3; }
+.tip-lbg .globe { width: 14px; height: 14px; margin-top: 2px; }
 /* Region lock (top-left): orange when locked to another region, teal when it is the home region. */
 .lock { position: absolute; left: -3px; top: -3px; width: 12px; height: 14px; z-index: 2; }
 .lock rect { fill: #e8730c; stroke: var(--surface); stroke-width: 1.2; }
@@ -212,6 +232,28 @@ main { margin-top: 12px; overflow-x: auto; }
 .tip-cp { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
 .tip-cp b { font: 700 1rem var(--font-display); }
 .tip-bg { color: #1d8f8a; }
+.tip-types { display: flex; gap: 4px; }
+.type { --type: #888; padding: 1px 8px; border-radius: 999px; background: var(--type); color: #fff; font: 700 .7rem var(--font-display); }
+.type.light { color: #1d1d1d; }
+.tip-supermax { color: var(--muted); }
+.tip-supermax.yes { color: #c98a00; font-weight: 700; }
+.tip-bonus { color: var(--accent); font-weight: 700; }
+/* Event-name tooltip: the day-panel event box itself. */
+.tip.tip-card { padding: 0; max-width: none; width: min(380px, calc(100vw - 16px)); border: none; background: transparent; }
+.tip.tip-card .evcard { background: var(--tip); box-shadow: var(--shadow); }
+.tip.tip-card .evcard.tier-super { background: var(--super); }
+.tip.tip-card .evcard.is-overseas { background: var(--overseas); }
+.tip.tip-card .evcard.tier-minor { opacity: 1; }
+.evnote { white-space: pre-line; }
+.tip-bar .tip-name { flex-wrap: wrap; align-items: center; }
+.tip-bar .tip-name b { flex: 1 1 0; min-width: 12em; }
+.tip-bar .tip-name .pin { width: 16px; height: 16px; font-size: 8px; }
+.tipev-mons { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--line); padding-top: 4px; }
+.tipev-mon { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tipev-mon .pin { width: 16px; height: 16px; font-size: 8px; }
+.tipev-pics { display: flex; gap: 8px; justify-content: center; margin-bottom: 6px; }
+.tipev-pics img { width: 96px; height: 96px; object-fit: contain; }
+.tipev-pics img.mid { width: 72px; height: 72px; }
 .tip-ev { border-top: 1px solid var(--line); padding-top: 4px; }
 .tip-remote { color: var(--overseas-ink); font-weight: 700; }
 .tip-comment { border-left: 3px solid var(--accent); padding-left: 6px; font-style: italic; }
@@ -222,7 +264,10 @@ main { margin-top: 12px; overflow-x: auto; }
   padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 24px 16px;
   overflow-y: auto; z-index: 20; display: flex; flex-direction: column; gap: 10px;
 }
-.day-head { display: flex; justify-content: space-between; align-items: center; }
+.day-head {
+  display: flex; justify-content: space-between; align-items: center; position: sticky; top: -16px; z-index: 3;
+  margin: -16px -16px 0; padding: 12px 16px 8px; background: var(--surface); border-bottom: 1px solid var(--line);
+}
 .day h3 { margin-top: 8px; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); min-width: 0; }
 .row .field { flex: 1 1 200px; }
