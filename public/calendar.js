@@ -419,7 +419,7 @@ const staticBackend = {
       }
       const days = {};
       applyLayer(events, days, pub, 'published');
-      staticBase = { events, days, generatedAt: snap.generatedAt || 0, campfire: cf };
+      staticBase = { events, days, generatedAt: snap.generatedAt || 0, campfire: cf && { ...cf, published: pub.campfire || {} } };
     }
     const events = clone(staticBase.events);
     const days = clone(staticBase.days);
@@ -488,7 +488,11 @@ const AUTHOR_KEY = 'pogoCalendarAuthor';
 function ownerLayer(publicOnly) {
   const layer = emptyLayer();
   for (const ev of (ownerData || data).events) {
-    if (publicOnly && !ev.public) continue;
+    // Meetups are published by default, even on a Leek Duck event that isn't public (as Store.publicSnapshot()).
+    if (publicOnly && !ev.public) {
+      if (ev.ld && ev.hosts?.length) layer.events[ev.id] = { edited: [], hosts: ev.hosts.map(({ going: _g, ...h }) => h), meetupsOnly: true };
+      continue;
+    }
     if (ev.source === 'user') layer.events[ev.id] = pick(ev, ['id', 'source', 'title', 'type', 'start', 'end', 'url', 'pokemon', 'from', ...USER_FIELDS]);
     else if (ev.edited?.length || USER_FIELDS.some((f) => isSet(ev[f]))) layer.events[ev.id] = pick(ev, ['edited', ...ev.edited, ...USER_FIELDS]);
     // Whether the owner attends a meetup stays private.
@@ -591,7 +595,14 @@ async function openPublic() {
     el('div', {}, el('b', { text: ev.title }), el('div', { class: 'what', text: `${fmtRange(ev)} · ${ev.source === 'user' ? 'your event'
       : ev.edited?.length ? `your changes: ${ev.edited.join(', ')}` : 'Leek Duck event'}${ev.note ? ' · note' : ''}${ev.tier ? ` · shown as ${ev.tier}` : ''}` })),
     el('button', { class: 'btn', text: 'Make private', onclick: unpublic(() => backend.updateEvent(ev.id, { public: false })) })))
-    : [el('p', { class: 'muted', text: 'No events are public.' })]));
+    : [el('p', { class: 'muted', text: 'No events are public.' })]),
+    // Published by default, whatever the ticks: meetups (without attending) and Campfire meetup targets.
+    ...(() => {
+      const meetEvs = d.events.filter((e) => !e.public && e.ld && e.hosts?.length).map((e) => e.title);
+      const cfTargets = Object.values(d.campfire?.mine || {}).filter((m) => m.pokemon?.length).length;
+      const parts = [meetEvs.length && `meetups on ${meetEvs.join(', ')}`, cfTargets && `your targets on ${cfTargets} Campfire meetup${cfTargets > 1 ? 's' : ''}`].filter(Boolean);
+      return parts.length ? [el('p', { class: 'muted', text: `Also published (meetups are always public; attending isn't): ${parts.join('; ')}.` })] : [];
+    })());
   $('pubDays').replaceChildren(...(days.length ? days.map(([k, x]) => el('div', { class: 'pub-row' },
     el('div', {}, el('b', { text: fmt(dayStart(k), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) }),
       el('div', { class: 'what', text: [x.rest && 'rest day', x.note && `note: ${x.note}`,
@@ -754,7 +765,10 @@ function buildCampfire() {
   const cf = data.campfire;
   if (!prefs.campfire || !cf?.meetups) return [];
   return cf.meetups.map((m) => {
-    const mine = (!preview && cf.mine?.[m.id]) || {}; // the public preview shows no one's marks
+    // Targets: the viewer's own, else the owner's published ones (public site); the public preview shows the
+    // owner's targets without attending, as published.
+    const own = cf.mine?.[m.id];
+    const mine = preview ? { pokemon: own?.pokemon } : own || { pokemon: cf.published?.[m.id]?.pokemon };
     const n = cfNorm(m.liveEvent);
     const same = (e) => { const t = cfNorm(e.title); return t.length > 3 && n.length > 3 && (t === n || t.includes(n) || n.includes(t)); };
     const ev = visibleEvents().find((e) => onDay(e, m.start.slice(0, 10)) && same(e))

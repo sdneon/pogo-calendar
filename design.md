@@ -96,14 +96,14 @@ Singapore trainer meetups from Campfire (`campfire.scopely.com/discover`), shown
   3. Each meetup's details, with only the fields shown: name, address, description, times, location, host's display name, club, game event, attendee count. The attendee list and comments are never requested. Details are reused for 12 h; public, in-box meetups only.
 
   Meetups that drop off are kept for 90 days after they end (history), like Leek Duck events.
-- **Server:** `data/campfire.json` `{fetchedAt, error, meetups[]}`, refreshed at startup when older than `REFRESH_HOURS`, then every `REFRESH_HOURS`, and by **Check Leek Duck**. `NO_CAMPFIRE=1` turns it off (`NO_REFRESH` doesn't, since it's about Leek Duck). `GET /api/campfire` → `{fetchedAt, error, refreshing, off, meetups, mine}`; `PUT /api/campfire/:id` `{going, pokemon}` saves the user's marks in the private `store.json` (`campfire: {id: {going, pokemon}}`), never published.
+- **Server:** `data/campfire.json` `{fetchedAt, error, meetups[]}`, refreshed at startup when older than `REFRESH_HOURS`, then every `REFRESH_HOURS`, and by **Check Leek Duck**. `NO_CAMPFIRE=1` turns it off (`NO_REFRESH` doesn't, since it's about Leek Duck). `GET /api/campfire` → `{fetchedAt, error, refreshing, off, meetups, mine}`; `PUT /api/campfire/:id` `{going, pokemon}` saves the user's marks in `store.json` (`campfire: {id: {going, pokemon}}`); Publish includes the targets (`public.json` `campfire: {id: {pokemon}}`, by default, no tick), never `going`.
 - **Page** (`buildCampfire()`, rebuilt by each `render()` into `CF`): each meetup becomes a meetup `{h, ev}` with `h.campfire` = the record. `ev` is the calendar event of the same name that day: names compared lower-case, letters and digits only, a trailing "Day N" dropped, either containing the other. Otherwise `ev` is a stand-in named after the game event. So Campfire meetups get the pink pin, the attending mark, their own targets, and the day's lines in tooltips, like the user's own.
   - Order in lists (`cfOrder`): attending first, then hosts in `CF_PRIORITY_HOSTS` (display names, any case), then by start.
   - The pin tooltip lists them one line each under "On Campfire (N)", in that order, at most 6.
   - A cell Pokémon's tooltip lists only those the user attends, plus a count of the others.
   - The day panel has a "Campfire meetups" section (`cfCard()`): link to the meetup's Campfire page (`/discover/meetup/<id>`), host and club, a Google Maps link from its coordinates, the description, **Attending?**, and "My targets for this meetup".
   - The header switch **Campfire meetups** (`prefs.campfire`) hides them all.
-- **Public site:** `tools/build_site.js` writes `site/campfire.json` `{fetchedAt, meetups}`. In GitHub Actions it fetches, reusing the previous site's `campfire.json` (next to `--known`'s `events.json`) for details and history; if the fetch fails, or `NO_CAMPFIRE` is set, the previous list is kept as it is. With `--from-store` it copies the server's `data/campfire.json`. The static page loads it with `events.json` / `public.json`; a visitor's attending and targets stay in their browser (localStorage `pogoCalendarCampfireMine`). The owner's marks are never published, and the public preview shows none.
+- **Public site:** `tools/build_site.js` writes `site/campfire.json` `{fetchedAt, meetups}`. In GitHub Actions it fetches, reusing the previous site's `campfire.json` (next to `--known`'s `events.json`) for details and history; if the fetch fails, or `NO_CAMPFIRE` is set, the previous list is kept as it is. With `--from-store` it copies the server's `data/campfire.json`. The static page loads it with `events.json` / `public.json`; a visitor's attending and targets stay in their browser (localStorage `pogoCalendarCampfireMine`). The owner's published Campfire targets (`public.json` `campfire`) show there until a visitor sets their own for that meetup; the owner's attending is never published, and the public preview shows the targets only.
 
 ## Static site (GitHub Pages)
 
@@ -114,7 +114,7 @@ The same page runs in two modes. `STATIC` in `calendar.js` is true unless the pa
   - a Leek Duck event goes in as a *patch* (`edited` plus the edited fields, and `note`/`hidden`/`tier`/`tz`/`starred`/`hosts`);
   - each public day goes in whole.
 
-  Nothing unflagged is included.
+  Nothing else unflagged is included, except what's published by default (no tick; the Public… dialog lists it): the meetups of a Leek Duck event that isn't public (a `meetupsOnly` patch of `hosts`; `adoptPublished()` takes it in without making the event public), and the owner's targets on Campfire meetups (`campfire`). Meetups on the owner's own private events stay private, since publishing them would reveal the event. `going` (attending) is never published. (Before 2026-10-27 meetups followed the event's public tick; the user changed this because the editor has no per-meetup tick.)
 - **Static mode:** `staticBackend` loads `events.json` (a list of Leek Duck `ld` records) and `public.json`, then merges in memory, in layers, with `applyLayer()`:
   1. the snapshot;
   2. published edits (mark `published`);
