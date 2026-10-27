@@ -22,7 +22,8 @@
   </nav>
   <div class="actions">
     <label class="switch"><input type="checkbox" id="bars" checked> Event bars</label>
-    <button id="refresh" class="btn">Check Leek Duck</button>
+    <label class="switch" id="campfireRow" title="Singapore trainer meetups from Campfire"><input type="checkbox" id="campfire" checked> Campfire meetups</label>
+    <button id="refresh" class="btn" title="Check Leek Duck for event updates, and Campfire for Singapore meetups">Check Leek Duck</button>
     <button id="pubBtn" class="btn" title="See and publish what you have marked for the public site">Public…</button>
     <button id="exportBtn" class="btn" title="Save your rest days, targets and edits as a file to keep or share">Export</button>
     <button id="importBtn" class="btn" title="Add rest days, targets and edits from a shared file">Import</button>
@@ -135,7 +136,7 @@
     <span class="sw sw-mundane"></span> nothing major
     · big icons: major events · small corner icons: weekly raid rotations
     · <span class="spark-key">✦</span> shiny · <span class="bg-key">BG</span> special background
-    · <span class="globe-key">🌐</span> Location Background (in person) · <span class="new-key">NEW</span> debut
+    · <span class="globe-key">🌐</span> Location Background (in person) · <span class="new-key">NEW</span> debut · <span class="meet-key">📍</span> trainer meetup
     · <span class="lock-key">🔒</span> region-locked (orange: other region, hover for SGT timings) · tap a pin to hide that activity
   </p>
 </section>
@@ -170,6 +171,8 @@
   <h3>Events</h3>
   <div id="dayEvents" class="day-events"></div>
   <button id="dayAddEvent" class="btn">+ Add event on this day</button>
+  <h3 id="dayCampfireHead" hidden>Campfire meetups</h3>
+  <div id="dayCampfire" class="day-events"></div>
 </aside>
 
 <dialog id="editor" class="editor">
@@ -193,6 +196,9 @@
     <label class="field">Note<textarea id="evNote" rows="2"></textarea></label>
     <h3>Pokémon</h3>
     <div id="evPokemon"></div>
+    <h3>Meetups</h3>
+    <p class="muted small">A trainer hosting a get-together for this event. Times are Singapore time.</p>
+    <div id="evHosts"></div>
     <label class="switch"><input type="checkbox" id="evHidden"> Hide this event from the calendar</label>
     <label id="evPublicRow" class="switch"><input type="checkbox" id="evPublic"> Show my changes to this event on the public site</label>
     <p id="editorError" class="error" hidden></p>

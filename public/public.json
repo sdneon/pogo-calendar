@@ -1,6 +1,23 @@
 {
- "publishedAt": 1792983607507,
+ "publishedAt": 1793109216055,
  "events": {
+  "2026-10-31-chandelure-super-mega-raid-day-2026": {
+   "edited": [],
+   "note": "",
+   "hidden": false,
+   "starred": [
+    "Mega Chandelure|supermega"
+   ],
+   "hosts": [
+    {
+     "host": "Sreebha",
+     "venue": "Vivocity",
+     "start": "2026-10-31T13:45",
+     "end": "2026-10-31T17:30",
+     "map": "https://www.google.com/maps/search/vivocity/@1.2643345,103.8198291,17z/data=!3m1!4b1?entry=ttu&g_ep=EgoyMDI2MTAyMC4wIKXMDSoASAFQAw%3D%3D"
+    }
+   ]
+  },
   "u-0bfb1bf4-f735-4778-975d-d19d7f154f76": {
    "id": "u-0bfb1bf4-f735-4778-975d-d19d7f154f76",
    "source": "user",
@@ -17,7 +34,17 @@
    "url": "https://www.thekallang.com.sg/en/things-to-do/events/pokemon-run-30-singapore-edition.html",
    "tier": "super",
    "tz": "",
-   "from": "Yun"
+   "from": "Yun",
+   "starred": [],
+   "hosts": [
+    {
+     "host": "Sreebha",
+     "venue": "Kallang Wave Mall",
+     "start": "2026-11-07T07:00",
+     "end": "2026-11-08T17:00",
+     "map": "https://www.google.com/maps/place/Kallang+Wave+Mall/@1.3026723,103.8711892,17z/data=!3m2!4b1!5s0x31da18497254e545:0x821482169ed856cb!4m6!3m5!1s0x31da184bf725078d:0xdba7455a8b6edfd1!8m2!3d1.3026669!4d103.8737641!16s%2Fg%2F11hdc2ys1t?entry=ttu&g_ep=EgoyMDI2MTAyMC4wIKXMDSoASAFQAw%3D%3D"
+    }
+   ]
   }
  },
  "days": {}

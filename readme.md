@@ -12,7 +12,7 @@ Open the [calendar page](https://sdneon.github.io/pogo-calendar/). The **?** but
 
 ### Reading it
 
-- **Big icons** are the Pokémon of events that draw crowds: Raid Hour, Spotlight Hour, Raid Days, Max Battle Days, Max Monday, Community Day and global GO Fest / Tour / Wild Area days. **Small icons in a day's bottom-right corner** are the week's raid bosses, and thin **bars** show how long each rotation runs. Each Max Monday also gets a Monday–Sunday bar, because its Dynamax Pokémon stays in Max Battles all week. Smaller events (GO Battle League, passes, research…) appear when you click a day.
+- **Big icons** are the Pokémon of events that draw crowds: Raid Hour, Spotlight Hour, Raid Days, Max Battle Days, Max Monday, Community Day and global GO Fest / Tour / Wild Area days. **Small icons in a day's bottom-right corner** are the week's raid bosses, and thin **bars** show how long each rotation runs. Each Max Monday also gets a Monday–Sunday bar, because its Dynamax Pokémon stays in Max Battles all week. Smaller events (GO Battle League, passes, research…) appear when you click a day; Pokémon you've starred or added in them still show as big icons.
 - **Pins** on an icon:
   - bottom-right: the activity (★: raid, M: Mega, M+: Super Mega, Sh: Shadow, D: Dynamax, G: Gigantamax, CD: Community Day, H: Hatch, SH: Spotlight Hour, R: Research, W: Wild spawn);
   - top-right: ✦ when shiny is available;
@@ -32,6 +32,7 @@ Open the [calendar page](https://sdneon.github.io/pogo-calendar/). The **?** but
   - for an orange padlock, when the event is live in that region, in SGT, for remote battles.
 
   Hovering an event bar shows the event's times and its Pokémon, with types. Hovering an event's name (an orange or ✈ day's title, a major event's time line, a "Running this month" chip) shows the same box as in the day panel.
+- **Meetups:** a 📍 pin beside a day's date means a trainer is hosting a meetup that day; hover it for the host, venue, time and event. Event, bar and Pokémon tooltips list the event's meetups too. **Right-click the pin** to mark that you're attending (the pin gets a circle); with several meetups that day, it opens the day so you can press **Attending?** on the right one. Whether you attend is never published.
 - **Day colours:**
   - orange: super major event, with its name on top;
   - periwinkle: overseas event (✈). Times are converted to SGT, and raids need a Remote Raid Pass;
@@ -44,6 +45,8 @@ Open the [calendar page](https://sdneon.github.io/pogo-calendar/). The **?** but
 
 - **Click a day** to add **target Pokémon**, write a note or tick **Rest day**. While a day is open, clicking any date closes it. You can pick a form, e.g. "Giratina (Origin)". ☆ stars a target, which shows a rainbow ring, and you can give it a comment that shows when you hover it.
 - **Edit** any event: title, times, Pokémon, how it's shown (super major / major / weekly / minor), and its location (time zone). **+ Add event** adds your own. Your own events come first among events of the same kind; to make one stand out, set **Shown as** to *Super major* (orange day, name on top) or *Major* (big icons). **Undo my changes** puts an event back as it was.
+- **Star** any of an event's Pokémon (☆ in its editor) to make it a target, without adding it again. It then shows on the calendar with a rainbow ring, even for a smaller event, and starred Pokémon always come first on a day.
+- **Meetups:** in an event's editor, **Add a meetup** records a trainer hosting a get-together for it: host, venue, start and end time (SGT, filled in from the event), and optionally a map link for the venue (a venue you've used before is suggested, with its map link filled in). Each meetup can also have its own **targets**: Pokémon shown (and starrable) only on that meetup's days, handy when a multi-day event has different meetups with different targets. Meetups show on the event's box, with a **Map** link in the day panel.
 - **On the public site, your changes are saved only in your browser** on that device. Nobody else sees them, and they're not sent anywhere. Clearing your browser data removes them, so keep a copy with Export.
 - **Export** saves your changes (rest days, targets, stars, comments, event edits) as a small file, to keep or share. You can add your name, so whoever imports it sees who suggested what. **Import** adds such a file, from another device or a friend, to your calendar. Nothing already there is removed: rest days are combined, notes are appended, and targets are added, marked with the sender's name.
   - Share with site admin if you want it published for all.
@@ -56,10 +59,13 @@ Double-click `start.bat`. It starts the server and opens <http://localhost:8642/
 
     set "NODE_EXE=<full path of node.exe>"
 
+- **Without opening a browser:** run `start.bat nobrowser`, or add `set "NO_BROWSER=1"` to `start.local.bat`.
+- **A new copy** (e.g. a fresh clone) fills itself in at startup: Leek Duck events, past ones included, come from the public site's `events.json`, and what `public/public.json` already publishes is taken in, so a later Publish keeps it. Your private changes don't travel this way; move them with Export / Import.
 - **Stopping:** close the server's window, or double-click `stop.bat`. It ends whatever is listening on the server's port (`PORT`, default 8642).
 - **Opening from disk:** you can also open `public/calendar.html` directly. It talks to the server on port 8642 when that's running, and shows its last saved copy (read only) when it isn't.
 - **Refreshing:** the server checks Leek Duck every 6 hours; **Check Leek Duck** checks now. Your edits to a Leek Duck event are kept field by field when it updates.
-- **Server settings** (environment variables): `PORT` (default 8642), `REFRESH_HOURS` (default 6), `NO_REFRESH=1` (never contact Leek Duck).
+- **Server settings** (environment variables): `PORT` (default 8642), `REFRESH_HOURS` (default 6), `NO_REFRESH=1` (never contact Leek Duck), `SITE_URL` (the public site, normally worked out from the GitHub remote), `NO_SEED=1` (don't fetch from it), `NO_CAMPFIRE=1` (don't fetch Campfire meetups).
+- **Campfire meetups:** the server also fetches Singapore trainer meetups from [Campfire](https://campfire.scopely.com/discover) every 6 hours. They get the same 📍 pin as your own meetups, and the day panel lists them with links to Campfire and a map; you can mark one as attending and give it your own targets, which stay private. The **Campfire meetups** switch hides them. The public site shows them too (refreshed with each site build), and visitors' attending marks and targets stay in their own browser. This uses the API behind Campfire's web page, which isn't official and may change.
 - **Opening a given month:** `http://localhost:8642/#2026-11`.
 
 ### Public site (GitHub Pages)
@@ -81,7 +87,7 @@ Visitors see the Leek Duck snapshot plus anything you published. Their own chang
 
 ### Data
 
-- **Your data:** everything is saved in `data/store.json`, and Leek Duck icons are cached in `data/icons/`. Back up `store.json` if your edits matter.
+- **Your data:** your own events, edits, days, stars and meetups are in `data/store.json`, a small file worth backing up. Leek Duck's events are in `data/store-public.json`, which can always be rebuilt. Icons are cached in `data/icons/`. An older single-file `store.json` is split on the first start and kept as `store-v1-backup.json`.
 - **`public/pokedex.js`** (names, forms, base stats, types, Mega/Primal types, legendary/mythical class) is generated:
 
       node tools/build_pokedex.js [game_master.json]

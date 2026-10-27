@@ -1,9 +1,9 @@
 'use strict';
 // Build the static site (site/) for GitHub Pages: the page from public/ (with public.json, the owner's
-// published edits), events.json (the Leek Duck snapshot) and icons/ (Leek Duck icons, same-origin so the
-// page can crop them).
+// published edits), events.json (the Leek Duck snapshot), campfire.json (Singapore Campfire meetups) and
+// icons/ (Leek Duck icons, same-origin so the page can crop them).
 // Usage:
-//   node tools/build_site.js --from-store          snapshot from the local data/store.json (no scraping)
+//   node tools/build_site.js --from-store          snapshot from the local store (no scraping)
 //   node tools/build_site.js [--known <file|url>]  scrape Leek Duck; <known> is the previous events.json,
 //                                                  so only new or stale detail pages are fetched
 
@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { scrape } = require('../lib/scrape');
 const { CDN, iconFile } = require('../lib/iconfile');
+const { fetchCampfire } = require('../lib/campfire');
 
 const ROOT = path.join(__dirname, '..');
 const SITE = path.join(ROOT, 'site');
@@ -31,11 +32,38 @@ async function readKnown(src) {
   }
 }
 
+// Campfire meetups (lib/campfire.js) for site/campfire.json. From the store: the server's data/campfire.json.
+// Otherwise fetched, starting from the previous site's campfire.json (next to --known's events.json); if the
+// fetch fails, or NO_CAMPFIRE is set, the previous list is kept as it is.
+async function buildCampfire() {
+  const empty = { fetchedAt: 0, meetups: [] };
+  if (process.argv.includes('--from-store')) {
+    try { const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'campfire.json'), 'utf8')); return { fetchedAt: c.fetchedAt, meetups: c.meetups }; }
+    catch { return empty; }
+  }
+  const src = (arg('--known') || '').replace(/events\.json$/, 'campfire.json');
+  let prev = empty;
+  if (/campfire\.json$/.test(src)) {
+    try { prev = /^https?:/.test(src) ? await (await fetch(src)).json() : JSON.parse(fs.readFileSync(src, 'utf8')); }
+    catch (e) { console.log(`no previous campfire.json (${e.message})`); }
+  }
+  if (process.env.NO_CAMPFIRE) return prev;
+  try {
+    const meetups = await fetchCampfire(Object.fromEntries((prev.meetups || []).map((m) => [m.id, m])), { log: (m) => console.log(`campfire: ${m}`) });
+    console.log(`campfire: ${meetups.length} meetups`);
+    return { fetchedAt: Date.now(), meetups };
+  } catch (e) {
+    console.log(`campfire failed (${e.message}); keeping the previous ${(prev.meetups || []).length}`);
+    return prev;
+  }
+}
+
 async function main() {
   let events;
   if (process.argv.includes('--from-store')) {
-    const store = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'store.json'), 'utf8'));
-    events = Object.values(store.events).filter((e) => e.ld).map((e) => e.ld);
+    const { Store } = require('../lib/store');
+    const store = new Store(path.join(ROOT, 'data', 'store.json'));
+    events = Object.values(store.data.events).filter((e) => e.ld).map((e) => e.ld);
   } else {
     const known = await readKnown(arg('--known'));
     events = await scrape(known, { log: (m) => console.log(m) });
@@ -47,6 +75,7 @@ async function main() {
     events.push(...kept);
     console.log(`kept ${kept.length} past events from the previous snapshot`);
   }
+  const campfire = await buildCampfire();
 
   fs.mkdirSync(ICONS, { recursive: true });
   // Start clean, except the icons (a cache between builds).
@@ -54,6 +83,7 @@ async function main() {
   for (const f of fs.readdirSync(path.join(ROOT, 'public'))) fs.copyFileSync(path.join(ROOT, 'public', f), path.join(SITE, f));
   if (!fs.existsSync(path.join(SITE, 'public.json'))) fs.writeFileSync(path.join(SITE, 'public.json'), '{"events":{},"days":{}}\n');
   fs.writeFileSync(path.join(SITE, 'events.json'), JSON.stringify({ generatedAt: Date.now(), events }));
+  fs.writeFileSync(path.join(SITE, 'campfire.json'), JSON.stringify(campfire));
   fs.writeFileSync(path.join(SITE, '.nojekyll'), '');
   fs.copyFileSync(path.join(SITE, 'calendar.html'), path.join(SITE, 'index.html'));
 

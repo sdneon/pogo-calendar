@@ -10,6 +10,7 @@ const STATIC = new URLSearchParams(location.search).has('static')
 const API = location.protocol === 'file:' ? 'http://localhost:8642' : '';
 const CACHE_KEY = 'pogoCalendarCache';
 const MINE_KEY = 'pogoCalendarMine'; // static mode: the visitor's own changes
+const CF_MINE_KEY = 'pogoCalendarCampfireMine'; // static mode: the visitor's attending / targets on Campfire meetups
 const PREFS_KEY = 'pogoCalendarPrefs';
 
 // Home: all times are shown in SGT. Leek Duck "local time" strings are read as home time,
@@ -91,7 +92,7 @@ const TYPE_ACT = { 'raid-battles': 'raid', 'raid-hour': 'raid', 'raid-day': 'rai
 // ---------- state ----------
 let data = { events: [], days: {}, lastRefresh: 0, lastError: '' };
 let online = false;
-let prefs = { month: null, bars: true, off: [] };
+let prefs = { month: null, bars: true, off: [], campfire: true };
 let selected = null; // 'YYYY-MM-DD'
 let editing = null;  // event being edited (copy)
 
@@ -376,7 +377,17 @@ const serverBackend = {
 };
 
 const FROM_LD = ['title', 'type', 'start', 'end', 'url', 'pokemon']; // fields an edit can override
-const USER_FIELDS = ['note', 'hidden', 'tier', 'tz'];
+const USER_FIELDS = ['note', 'hidden', 'tier', 'tz', 'starred', 'hosts'];
+const isSet = (v) => (Array.isArray(v) ? v.length > 0 : !!v);
+// Stars on Pokémon the user didn't add live in the event's `starred` keys, so the list itself stays Leek Duck's.
+const starKey = (p) => `${p.name}|${p.act}`;
+function markStars(ev) {
+  if (!ev?.pokemon) return ev;
+  const keys = new Set(ev.starred || []);
+  ev.pokemon = ev.pokemon.map((p) => (p.mine ? p : keys.has(starKey(p)) ? { ...p, star: true } : (({ star: _s, ...q }) => q)(p)));
+  return ev;
+}
+const markAllStars = (d) => { for (const ev of d.events || []) markStars(ev); return d; };
 const emptyLayer = () => ({ events: {}, days: {} });
 const clone = (x) => JSON.parse(JSON.stringify(x));
 // One layer of edits over a map of events: a user event (source 'user') goes in whole, a Leek Duck one
@@ -401,19 +412,20 @@ const staticBackend = {
   async load() {
     if (!staticBase) {
       const get = async (f) => { const r = await fetch(f, { cache: 'no-cache' }); if (!r.ok) throw new Error(`${f}: ${r.status}`); return r.json(); };
-      const [snap, pub] = await Promise.all([get('events.json'), get('public.json').catch(() => emptyLayer())]);
+      const [snap, pub, cf] = await Promise.all([get('events.json'), get('public.json').catch(() => emptyLayer()), get('campfire.json').catch(() => null)]);
       const events = {};
       for (const ld of snap.events || []) {
         events[ld.id] = { ...clone(ld), id: ld.id, source: 'leekduck', ld, edited: [], note: '', hidden: false, tier: '', tz: '' };
       }
       const days = {};
       applyLayer(events, days, pub, 'published');
-      staticBase = { events, days, generatedAt: snap.generatedAt || 0 };
+      staticBase = { events, days, generatedAt: snap.generatedAt || 0, campfire: cf };
     }
     const events = clone(staticBase.events);
     const days = clone(staticBase.days);
     applyLayer(events, days, mineLayer(), 'local');
-    return { events: Object.values(events), days, lastRefresh: staticBase.generatedAt, lastError: '', static: true };
+    const cf = staticBase.campfire && { ...staticBase.campfire, mine: store.get(CF_MINE_KEY) || {} };
+    return { events: Object.values(events), days, lastRefresh: staticBase.generatedAt, lastError: '', static: true, campfire: cf };
   },
   // Writes update the visitor's layer, then return the merged event like the server would.
   async save(fn) { const m = mineLayer(); fn(m); store.set(MINE_KEY, m); return this.load(); },
@@ -448,7 +460,8 @@ const backend = STATIC ? staticBackend : serverBackend;
 
 async function load() {
   try {
-    const fresh = await backend.load();
+    const fresh = markAllStars(await backend.load());
+    if (!STATIC) fresh.campfire = await api('GET', '/api/campfire').catch(() => null);
     if (preview) { ownerData = fresh; data = publicView(fresh); } else data = fresh;
     online = true;
     if (!STATIC) store.set(CACHE_KEY, { savedAt: Date.now(), data: fresh });
@@ -463,7 +476,7 @@ async function load() {
   }
   if (online) $('offline').hidden = true;
   render();
-  if (data.refreshing) setTimeout(load, 4000);
+  if (data.refreshing || data.campfire?.refreshing) setTimeout(load, 4000);
 }
 
 // ---------- export / import of "my changes" ----------
@@ -477,7 +490,10 @@ function ownerLayer(publicOnly) {
   for (const ev of (ownerData || data).events) {
     if (publicOnly && !ev.public) continue;
     if (ev.source === 'user') layer.events[ev.id] = pick(ev, ['id', 'source', 'title', 'type', 'start', 'end', 'url', 'pokemon', 'from', ...USER_FIELDS]);
-    else if (ev.edited?.length || USER_FIELDS.some((f) => ev[f])) layer.events[ev.id] = pick(ev, ['edited', ...ev.edited, ...USER_FIELDS]);
+    else if (ev.edited?.length || USER_FIELDS.some((f) => isSet(ev[f]))) layer.events[ev.id] = pick(ev, ['edited', ...ev.edited, ...USER_FIELDS]);
+    // Whether the owner attends a meetup stays private.
+    const out = layer.events[ev.id];
+    if (publicOnly && out?.hosts) out.hosts = out.hosts.map(({ going: _g, ...h }) => h);
   }
   for (const [d, day] of Object.entries((ownerData || data).days)) {
     if (!publicOnly || day.public) layer.days[d] = pick(day, ['rest', 'note', 'pokemon']);
@@ -556,7 +572,7 @@ function publicView(d) {
   for (const ev of d.events) if (ev.ld) events[ev.id] = { ...clone(ev.ld), id: ev.id, source: 'leekduck', ld: ev.ld, edited: [], note: '', hidden: false, tier: '', tz: '' };
   const days = {};
   applyLayer(events, days, ownerLayer(true), 'published');
-  return { ...d, events: Object.values(events), days };
+  return markAllStars({ ...d, events: Object.values(events), days });
 }
 function setPreview(on) {
   if (on === preview) return;
@@ -588,7 +604,8 @@ async function openPublic() {
     const r = await api('GET', '/api/public');
     $('pubStatus').replaceChildren(r.upToDate
       ? el('span', { class: 'pub-ok', text: `public/public.json is up to date (published ${new Date(r.publishedAt).toLocaleString()}).` })
-      : el('span', { class: 'pub-warn', text: r.publishedAt ? 'You have changes that are not published yet: press Publish.' : 'Nothing published yet.' }));
+      : el('span', { class: 'pub-warn', text: r.publishedAt ? 'You have changes that are not published yet: press Publish.' : 'Nothing published yet.' }),
+      r.dropping?.length ? el('div', { class: 'pub-warn', text: `Publish will remove from the public site: ${r.dropping.join(', ')}.` }) : '');
   } catch (e) { $('pubStatus').textContent = `Could not check: ${e.message}`; }
 }
 
@@ -699,6 +716,54 @@ function globePin(place) {
   }
   return svg;
 }
+// Meetup mark: a map pin, beside the date of a day with a trainer meetup.
+function meetPin() {
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 12 14');
+  svg.setAttribute('class', 'meetpin');
+  svg.setAttribute('aria-label', 'Trainer meetup');
+  const path = document.createElementNS(SVGNS, 'path');
+  path.setAttribute('d', 'M6 13.5C6 13.5 1 8.6 1 5.2a5 5 0 0 1 10 0C11 8.6 6 13.5 6 13.5ZM6 7.2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z');
+  path.setAttribute('fill-rule', 'evenodd');
+  svg.append(path);
+  return svg;
+}
+// A meetup's days: start day through end day (an end at midnight doesn't count, at most 14 days);
+// no start: its event's first day.
+function onMeetDay(h, ev, day) {
+  if (!h.start) return homeDay(evRange(ev)[0]) === day;
+  const first = h.start.slice(0, 10);
+  const end = h.end > h.start ? h.end : '';
+  const last = !end ? first : end.slice(11) === '00:00' ? addDays(end.slice(0, 10), -1) : end.slice(0, 10);
+  return day >= first && day <= (last < first ? first : last) && day <= addDays(first, 13);
+}
+const dayMeetups = (day) => [...visibleEvents().flatMap((ev) => (ev.hosts || []).filter((h) => onMeetDay(h, ev, day)).map((h) => ({ h, ev }))),
+  ...CF.filter(({ h, ev }) => onMeetDay(h, ev, day))];
+
+// ---------- Campfire meetups (owner mode only; fetched by the server, lib/campfire.js) ----------
+// Each is shown like a meetup ({h, ev}): `h.campfire` holds the Campfire record, `h.going` / `h.pokemon` the
+// user's own marks (data.campfire.mine, private). `ev` is the calendar event of the same name that day, else a
+// stand-in named after Campfire's game event.
+let CF = []; // rebuilt by render()
+// Order of Campfire meetups in lists: attended first, then these hosts (display names, any case), then by start.
+const CF_PRIORITY_HOSTS = ['Sreebha'];
+const cfPriority = (h) => CF_PRIORITY_HOSTS.some((n) => n.toLowerCase() === String(h.host).toLowerCase());
+const cfOrder = (a, b) => !!b.h.going - !!a.h.going || cfPriority(b.h) - cfPriority(a.h) || a.h.start.localeCompare(b.h.start);
+const cfNorm = (s) => String(s || '').toLowerCase().replace(/\s+day\s*\d+\s*$/, '').replace(/[^a-z0-9]+/g, '');
+function buildCampfire() {
+  const cf = data.campfire;
+  if (!prefs.campfire || !cf?.meetups) return [];
+  return cf.meetups.map((m) => {
+    const mine = (!preview && cf.mine?.[m.id]) || {}; // the public preview shows no one's marks
+    const n = cfNorm(m.liveEvent);
+    const same = (e) => { const t = cfNorm(e.title); return t.length > 3 && n.length > 3 && (t === n || t.includes(n) || n.includes(t)); };
+    const ev = visibleEvents().find((e) => onDay(e, m.start.slice(0, 10)) && same(e))
+      || { id: `cf-${m.id}`, title: m.liveEvent || m.name, start: m.start, end: m.end, tz: '', pokemon: [], campfireOnly: true };
+    const h = { host: m.host, venue: m.address.replace(/,\s*Singapore$/, ''), start: m.start, end: m.end,
+      map: `https://www.google.com/maps/search/?api=1&query=${m.lat},${m.lng}`, going: !!mine.going, pokemon: mine.pokemon || [], campfire: m };
+    return { h, ev };
+  });
+}
 const debutBadge = (p) => el('span', { class: `newpin${p.debut === 'shiny' ? ' shiny' : ''}`, text: 'NEW' });
 // When a local-time event window is live across a region, as SGT times per sample place.
 function regionWindows(ev, region) {
@@ -733,7 +798,7 @@ function eventPokemon(ev) {
   return list.filter((p) => !(p.act === 'event' && acted.has(p.name)));
 }
 // Order in event boxes and bar tooltips: the user's own, raid bosses, debuts, valuable ones.
-const monRank = (p) => (p.mine ? 8 : 0) + (RAID_ACTS.has(p.act) ? 4 : 0) + (p.debut ? 2 : 0) + (isValuable(p) ? 1 : 0);
+const monRank = (p) => (p.star ? 16 : 0) + (p.mine ? 8 : 0) + (RAID_ACTS.has(p.act) ? 4 : 0) + (p.debut ? 2 : 0) + (isValuable(p) ? 1 : 0);
 // The user's own events come before Leek Duck ones of the same tier (cell icons and day panel).
 const mineFirst = (a, b) => (b.source === 'user') - (a.source === 'user');
 const monKey = (p) => `${(p.dex || p.name).toString().toLowerCase()}|${p.act}`;
@@ -748,17 +813,34 @@ function dayInfo(day) {
   const take = (list, out, p, ev) => { const k = monKey(p); if (seen.has(k) || !shownAct(p)) return; seen.add(k); out.push({ p, ev }); };
 
   const main = [];
-  for (const p of data.days[day]?.pokemon || []) take(null, main, p, null);
+  // A day target that is also an event's Pokémon that day takes that event, so its tooltip shows it.
+  const evOf = (p) => evs.find((ev) => eventPokemon(ev).some((q) => monKey(q) === monKey(p))) || null;
+  const dayTargets = data.days[day]?.pokemon || [];
+  // Targets of that day's meetups (`meetup` names the meetup in the tooltip).
+  const meetTargets = dayMeetups(day).flatMap(({ h, ev }) => (h.pokemon || []).map((p) => ({ p: { ...p, mine: true, meetup: h }, ev })));
+  const short = (ev) => spanDays(ev) <= SEASON_DAYS;
+  // Starred Pokémon come first, whichever event lists them: meetup targets, day targets, then events.
+  for (const { p, ev } of meetTargets) if (p.star) take(null, main, p, ev);
+  for (const p of dayTargets) if (p.star) take(null, main, p, evOf(p));
+  for (const ev of evs) if (short(ev)) for (const p of eventPokemon(ev)) if (p.star) take(null, main, p, ev);
+  for (const { p, ev } of meetTargets) take(null, main, p, ev);
+  for (const p of dayTargets) take(null, main, p, evOf(p));
   // Super and overseas events list dozens of spawns: only raid bosses, valuable and user-added ones go on the cell.
   for (const ev of [...by.super, ...by.major]) {
     if (spanDays(ev) > SEASON_DAYS) continue;
     const big = by.super.includes(ev) || isOverseas(ev);
-    const mons = eventPokemon(ev).filter((p) => !big || p.mine || isValuable(p) || RAID_ACTS.has(p.act) || p.act === 'cd' || p.debut)
-      .sort((a, b) => !!b.mine - !!a.mine || !!b.debut - !!a.debut || isValuable(b) - isValuable(a));
+    const mons = eventPokemon(ev).filter((p) => !big || p.mine || p.star || isValuable(p) || RAID_ACTS.has(p.act) || p.act === 'cd' || p.debut)
+      .sort((a, b) => !!b.star - !!a.star || !!b.mine - !!a.mine || !!b.debut - !!a.debut || isValuable(b) - isValuable(a));
     for (const p of mons) take(null, main, p, ev);
   }
+  // Minor events stay off the cell, except Pokémon the user starred or added.
+  let minorTargets = 0;
+  for (const ev of by.minor) {
+    if (spanDays(ev) > SEASON_DAYS) continue;
+    for (const p of eventPokemon(ev)) if (p.star || p.mine) { take(null, main, p, ev); minorTargets++; }
+  }
   const corner = [];
-  for (const ev of by.weekly) for (const p of ev.pokemon || []) if (RAID_ACTS.has(p.act) || p.mine) take(null, corner, p, ev);
+  for (const ev of by.weekly) for (const p of ev.pokemon || []) if (RAID_ACTS.has(p.act) || p.mine || p.star) take(null, corner, p, ev);
 
   const weeklyStar = corner.some(({ p }) => (p.act === 'shadow' && classOf(p)) || p.star);
   const userDay = data.days[day];
@@ -767,7 +849,8 @@ function dayInfo(day) {
     super: by.super.filter((ev) => !isOverseas(ev)),
     overseas: [...by.super, ...by.major].filter(isOverseas),
     rest: !!userDay?.rest,
-    mundane: !by.super.length && !by.major.length && !weeklyStar && !(userDay?.pokemon || []).length,
+    mundane: !by.super.length && !by.major.length && !weeklyStar && !minorTargets && !meetTargets.length
+      && !main.some(({ p }) => p.star) && !(userDay?.pokemon || []).length,
   };
 }
 
@@ -779,9 +862,14 @@ function render() {
   const [y, m] = month.split('-').map(Number);
   $('monthTitle').textContent = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
   $('bars').checked = prefs.bars;
-  $('status').textContent = STATIC ? `Times in ${HOME.label}. Leek Duck snapshot from ${ago(data.lastRefresh)}. Your changes are saved in this browser only.`
+  $('campfire').checked = prefs.campfire;
+  CF = buildCampfire();
+  const cf = data.campfire;
+  const cfStatus = !cf || cf.off || !cf.fetchedAt ? '' : cf.refreshing ? ' · checking Campfire…'
+    : ` · Campfire: ${cf.meetups.length} meetups, checked ${ago(cf.fetchedAt)}${cf.error ? `, last check failed: ${cf.error.replace(/^\S+: /, '')}` : ''}`;
+  $('status').textContent = STATIC ? `Times in ${HOME.label}. Leek Duck snapshot from ${ago(data.lastRefresh)}${cfStatus}. Your changes are saved in this browser only.`
     : data.refreshing ? 'Checking Leek Duck…'
-    : `Times in ${HOME.label}. Leek Duck checked ${ago(data.lastRefresh)}${data.lastError ? ` · last check failed: ${data.lastError.replace(/^\S+: /, '')}` : ''}`;
+    : `Times in ${HOME.label}. Leek Duck checked ${ago(data.lastRefresh)}${data.lastError ? ` · last check failed: ${data.lastError.replace(/^\S+: /, '')}` : ''}${cfStatus}`;
   for (const id of ['refresh', 'addEvent', 'dayAddEvent']) $(id).disabled = !canEdit();
 
   renderLegend();
@@ -860,18 +948,27 @@ function renderCell(key, col, month, todayKey) {
     info.rest ? 'rest' : info.super.length ? 'super' : info.overseas.length ? 'overseas' : info.mundane && 'mundane'];
   const majors = info.by.major.filter((ev) => !isOverseas(ev));
   const majorNames = majors.map((ev, i) => [i ? ' · ' : '', evTip(el('span', { text: `${fmtTime(evRange(ev)[0])} ${ev.title}` }), ev)]);
+  const meets = dayMeetups(key);
+  const going = meets.some(({ h }) => h.going);
+  const meetMark = meets.length ? el('span', { class: `meet${going ? ' going' : ''}`,
+    'aria-label': `${meets.length} trainer meetup${meets.length > 1 ? 's' : ''}${going ? ', attending' : ''}`,
+    oncontextmenu: (e) => { e.preventDefault(); e.stopPropagation(); goingFromPin(key, meets); } }, meetPin(),
+    meets.length > 1 ? el('span', { text: meets.length }) : null) : null;
+  if (meetMark) MEET_TIP.set(meetMark, meets);
+  // Cell icons know their day, so their tooltip lists that day's meetups.
+  const cellMon = (p, ev, size) => { const n = monIcon(p, ev, size); TIP.get(n).day = key; return n; };
   return el('button', {
     class: cls.filter(Boolean).join(' '), style: `grid-column:${col + 1}`, 'data-day': key,
     'aria-label': `${key}${info.rest ? ', rest day' : ''}`, onclick: () => (selected ? $('dayClose').click() : openDay(key)),
   },
-  el('span', { class: 'date' }, el('span', { text: +key.slice(8) }),
+  el('span', { class: 'date' }, el('span', { class: 'daynum' }, el('span', { text: +key.slice(8) }), meetMark),
     info.rest ? el('span', { class: 'badge', text: 'Rest' }) : null),
   info.super.map((ev) => evTip(el('span', { class: 'supername', text: ev.title }), ev)),
   info.overseas.map((ev) => evTip(el('span', { class: 'overseasname', text: `✈ ${ev.title}` }), ev)),
-  el('span', { class: 'mons' }, info.main.slice(0, max).map(({ p, ev }) => monIcon(p, ev)),
+  el('span', { class: 'mons' }, info.main.slice(0, max).map(({ p, ev }) => cellMon(p, ev)),
     info.main.length > max ? el('span', { class: 'more', text: `+${info.main.length - max}` }) : null),
   majorNames.length ? el('span', { class: 'evcount' }, majorNames.flat()) : null,
-  info.corner.length ? el('span', { class: 'corner' }, info.corner.slice(0, 5).map(({ p, ev }) => monIcon(p, ev, 'small'))) : null);
+  info.corner.length ? el('span', { class: 'corner' }, info.corner.slice(0, 5).map(({ p, ev }) => cellMon(p, ev, 'small'))) : null);
 }
 
 function renderLegend() {
@@ -906,7 +1003,7 @@ function renderRunning(first, nextMonth) {
 }
 
 // ---------- rich tooltip ----------
-function tipContent({ p, ev }) {
+function tipContent({ p, ev, day }) {
   const big = iconUrls(p).length > 0;
   const cls = classOf(p);
   const h = hundo(p);
@@ -955,9 +1052,20 @@ function tipContent({ p, ev }) {
       w && !home ? el('ul', {}, w.rows.map((r) => el('li', { text: `${r.place}: ${fmtTime(r.s)} – ${fmtTime(r.e)}` }))) : null));
   }
   if (ev) rows.push(el('div', { class: 'tip-ev' }, el('div', { text: ev.title }), el('div', { class: 'muted', text: whenText(ev) }),
-    isOverseas(ev) ? el('div', { class: 'tip-remote', text: remoteNote(p, ev) }) : null));
+    isOverseas(ev) ? el('div', { class: 'tip-remote', text: remoteNote(p, ev) }) : null, day ? null : meetLines(ev)));
+  // On a calendar cell: every meetup that day, named by event when it's another one.
+  // The user's own meetups and the Campfire ones they attend; other Campfire ones only as a count.
+  const allMeets = day ? dayMeetups(day) : [];
+  const dayMeets = allMeets.filter(({ h }) => !h.campfire || h.going);
+  const cfOthers = allMeets.length - dayMeets.length;
+  if (dayMeets.length || cfOthers) {
+    rows.push(el('div', { class: 'tip-meet tip-ev' }, dayMeets.map(({ h, ev: e }) => el('div', {}, meetPin(),
+      el('span', { text: `${meetText(h)}${e.id === ev?.id || e.title === ev?.title ? '' : ` (${e.title})`}` }))),
+      cfOthers ? el('div', { class: 'muted' }, meetPin(), el('span', { text: `${cfOthers} ${dayMeets.length ? 'more ' : ''}Campfire meetup${cfOthers > 1 ? 's' : ''} that day` })) : null));
+  }
+  if (p.meetup) rows.push(el('div', { class: 'tip-meet' }, el('div', {}, meetPin(), el('span', { text: `Target for the meetup: ${[p.meetup.host, p.meetup.venue].filter(Boolean).join(' @ ')}` }))));
   if (p.from) rows.push(el('div', { class: 'muted', text: `Suggested by ${p.from}` }));
-  else if (p.mine) rows.push(el('div', { class: 'muted', text: p.star ? 'Your starred target' : 'Added by you' }));
+  else if (p.mine) rows.push(el('div', { class: 'muted', text: 'Added by you' })); // a star shows as the rainbow ring, not text
   if (p.comment) rows.push(el('div', { class: 'tip-comment', text: p.comment }));
   const bigImg = big ? el('img', { alt: '' }) : null;
   if (big) trimmed(iconUrls(p)).then((u) => { if (u) bigImg.src = u; else bigImg.remove(); });
@@ -999,6 +1107,7 @@ function barTipContent(ev) {
   const bonus = real.bonus || real.ld?.bonus;
   if (bonus) rows.push(el('div', { class: 'tip-bonus', text: `Bonus: ${bonus}` }));
   if (real.note) rows.push(el('div', { class: 'tip-comment', text: real.note }));
+  rows.push(meetLines(real));
   if (real.from) rows.push(el('div', { class: 'muted', text: `Suggested by ${real.from}` }));
   // Big pictures of the top (up to 3) Pokémon on top, as in the Pokémon tooltip.
   const top = mons.slice(0, 3).filter((p) => iconUrls(p).length);
@@ -1013,14 +1122,43 @@ function barTipContent(ev) {
 // Event names on the calendar (super / overseas names, major-event lines, "Running this month" chips): their day-panel box.
 const EV_TIP = new WeakMap(); // element -> event
 function evTip(node, ev) { node.classList.add('evtip'); EV_TIP.set(node, ev); return node; }
+// An event's meetups as tooltip lines (null if none).
+function meetLines(ev) {
+  if (!(ev.hosts || []).length) return null;
+  return el('div', { class: 'tip-meet' }, ev.hosts.map((h) => el('div', {}, meetPin(), el('span', { text: meetText(h) }))));
+}
+// The cell's meetup mark: that day's meetups, each with its event.
+const MEET_TIP = new WeakMap(); // mark -> [{h, ev}]
+// The user's own meetups in full; Campfire ones (attending first) one line each, at most CF_TIP_MAX.
+const CF_TIP_MAX = 6;
+function meetTipContent(list) {
+  const own = list.filter(({ h }) => !h.campfire);
+  const cf = list.filter(({ h }) => h.campfire).sort(cfOrder);
+  return el('div', { class: 'tip-text' }, el('div', { class: 'tip-name' }, el('b', { text: list.length > 1 ? 'Trainer meetups' : 'Trainer meetup' })),
+    own.map(({ h, ev }) => el('div', { class: 'tip-meet' }, el('div', {}, meetPin(), el('span', { text: meetText(h) })),
+      meetMons(h, ev),
+      el('div', { class: 'muted', text: `${ev.title} · ${whenText(ev)}` }))),
+    cf.length ? el('div', { class: 'tip-meet tip-cf' }, el('div', { class: 'muted', text: `On Campfire (${cf.length}):` }),
+      cf.slice(0, CF_TIP_MAX).map(({ h, ev }) => el('div', { class: 'tip-cfline' }, el('div', {}, meetPin(),
+        el('span', { text: `${hostText(h)} · ${h.campfire.going} going${h.going ? ' · ✓ attending' : ''}` })), meetMons(h, ev))),
+      cf.length > CF_TIP_MAX ? el('div', { class: 'muted', text: `+${cf.length - CF_TIP_MAX} more in the day panel` }) : null) : null);
+}
+// A meetup's own targets, starred first (★), with small icons.
+function meetMons(h, ev) {
+  const list = [...(h.pokemon || [])].sort((a, b) => !!b.star - !!a.star);
+  if (!list.length) return null;
+  return el('div', { class: 'tip-meetmons' }, list.map((p) => el('span', { class: `tip-meetmon${p.star ? ' starred' : ''}` },
+    monIcon({ ...p, mine: true }, ev), el('span', { text: `${p.star ? '★ ' : ''}${p.name}` }))));
+}
 function showTip(target, x, y) {
   const info = TIP.get(target);
   const barEv = !info && BAR_TIP.get(target);
   const nameEv = !info && !barEv && EV_TIP.get(target);
-  if (!info && !barEv && !nameEv) return;
+  const meets = !info && !barEv && !nameEv && MEET_TIP.get(target);
+  if (!info && !barEv && !nameEv && !meets) return;
   const tip = $('tip');
   tip.classList.toggle('tip-card', !!nameEv);
-  tip.replaceChildren(info ? tipContent(info) : barEv ? barTipContent(barEv) : evCard(nameEv, true));
+  tip.replaceChildren(info ? tipContent(info) : barEv ? barTipContent(barEv) : nameEv ? evCard(nameEv, true) : meetTipContent(meets));
   tip.hidden = false;
   const r = tip.getBoundingClientRect();
   const left = Math.min(x + 14, window.innerWidth - r.width - 8);
@@ -1029,7 +1167,7 @@ function showTip(target, x, y) {
   tip.style.top = `${Math.max(8, top)}px`;
 }
 document.addEventListener('mouseover', (e) => {
-  const m = e.target.closest?.('.mon, .bar, .evtip');
+  const m = e.target.closest?.('.mon, .bar, .evtip, .meet');
   if (m) showTip(m, e.clientX, e.clientY); else $('tip').hidden = true;
 });
 document.addEventListener('scroll', () => { $('tip').hidden = true; }, true);
@@ -1065,6 +1203,28 @@ function renderDay() {
     .sort((a, b) => order[tierOf(a)] - order[tierOf(b)] || mineFirst(a, b) || evRange(a)[0] - evRange(b)[0]);
   if (!evs.length) box.append(el('p', { class: 'muted', text: 'No events on this day.' }));
   for (const ev of evs) box.append(evCard(ev, false));
+
+  // Campfire meetups that day, attending first, then by start.
+  const cfs = CF.filter(({ h, ev }) => onMeetDay(h, ev, key)).sort(cfOrder);
+  $('dayCampfireHead').hidden = !cfs.length;
+  $('dayCampfireHead').textContent = `Campfire meetups (${cfs.length})`;
+  $('dayCampfire').replaceChildren(...cfs.map(({ h, ev }) => cfCard(h, ev)));
+}
+// A Campfire meetup in the day panel: its Campfire page, place, times, who hosts, the user's attending and targets.
+function cfCard(h, ev) {
+  const m = h.campfire;
+  return el('div', { class: `evcard cfcard${h.going ? ' going' : ''}` },
+    el('div', { class: 't' }, meetPin(), el('a', { href: m.url, target: '_blank', rel: 'noopener', text: m.name || ev.title }),
+      el('span', { class: 'tag', text: `${m.going} going` })),
+    el('div', { class: 'when', text: `${hostText({ start: h.start, end: h.end })} SGT · for ${ev.title}` }),
+    el('div', {}, `${m.host}${m.club ? ` (${m.club})` : ''} @ `, el('a', { href: h.map, target: '_blank', rel: 'noopener', text: h.venue || 'map' })),
+    m.details ? el('div', { class: 'evnote cfdetails', text: m.details }) : null,
+    el('div', { class: 'links' },
+      el('button', { class: `btn going-btn${h.going ? ' on' : ''}`, type: 'button', disabled: !canEdit(), 'aria-pressed': String(!!h.going),
+        text: h.going ? '✓ Attending' : 'Attending?', onclick: () => toggleGoing(ev, h) })),
+    el('details', { class: 'cftargets', ...(h.pokemon.length ? { open: true } : {}) }, el('summary', { text: `My targets for this meetup${h.pokemon.length ? ` (${h.pokemon.length})` : ''}` }),
+      pokemonEditor(h.pokemon, (list) => saveCampfireMine(h, { pokemon: list }).catch((e) => { $('status').textContent = `Could not save: ${e.message}`; }),
+        !canEdit(), true, 'Target for this meetup only, e.g. Zacian (Crowned Sword)')));
 }
 // An event's box: in the day panel, and (`inTip`, without buttons or links) as the tooltip of its name on the calendar.
 function evCard(ev, inTip) {
@@ -1088,6 +1248,11 @@ function evCard(ev, inTip) {
       }),
       bonus ? el('div', { class: 'tip-bonus', text: `Bonus: ${bonus}` }) : null,
       ev.note ? el('div', { class: 'evnote', text: ev.note }) : null,
+      ...(ev.hosts || []).map((h) => el('div', { class: 'evhost' }, meetPin(), el('span', { text: `Meetup: ${hostText(h)}` }),
+        /^https?:\/\//.test(h.map || '') && !inTip ? el('a', { href: h.map, target: '_blank', rel: 'noopener', text: 'Map' }) : null,
+        inTip ? null : el('button', { class: `btn going-btn${h.going ? ' on' : ''}`, type: 'button', disabled: !canEdit(), 'aria-pressed': String(!!h.going),
+          title: h.going ? 'You are attending: click to undo' : 'Mark as attending', text: h.going ? '✓ Attending' : 'Attending?',
+          onclick: () => toggleGoing(ev, h) }))),
       inTip ? null : el('div', { class: 'links' },
         el('button', { class: 'btn', disabled: !canEdit(), onclick: () => openEditor(ev), text: 'Edit' }),
         ev.url ? el('a', { href: ev.url, target: '_blank', rel: 'noopener', text: 'Info page' }) : null));
@@ -1133,17 +1298,17 @@ function regionSelect(value, onchange) {
   for (const [k, r] of Object.entries(REGIONS)) s.append(el('option', { value: k, selected: k === value, text: `🔒 ${r.label}` }));
   return s;
 }
-// `allMine`: every row is the user's (day targets); otherwise only rows the user added get star/comment.
-function pokemonEditor(list, onChange, disabled, allMine = false) {
+// `allMine`: every row is the user's (day targets); otherwise every row can be starred, and rows the user added get a comment.
+function pokemonEditor(list, onChange, disabled, allMine = false, placeholder = 'Add Pokémon, e.g. Mega Gengar') {
   const items = list.map((p) => ({ ...p, ...(allMine ? { mine: true } : {}) }));
   const wrap = el('div', { class: 'pkl' });
   const draw = () => {
     wrap.replaceChildren();
     items.forEach((p, i) => {
       const row = el('div', { class: 'pkrow' }, monIcon(p, null), el('span', { class: 'name', text: p.name }),
-        p.mine ? el('button', { class: `btn icon starbtn${p.star ? ' on' : ''}`, type: 'button', disabled, 'aria-pressed': String(!!p.star),
+        el('button', { class: `btn icon starbtn${p.star ? ' on' : ''}`, type: 'button', disabled, 'aria-pressed': String(!!p.star),
           title: p.star ? 'Starred: shown with a rainbow ring' : 'Star this target', text: p.star ? '★' : '☆',
-          onclick: () => { p.star = !p.star; onChange(items); draw(); } }) : null,
+          onclick: () => { p.star = !p.star; onChange(items); draw(); } }),
         actSelect(p.act, (e) => { p.act = e.target.value; onChange(items); draw(); }),
         regionSelect(p.region, (e) => { p.region = e.target.value; onChange(items); draw(); }),
         el('button', { class: 'btn icon', type: 'button', 'aria-label': `Remove ${p.name}`, disabled, onclick: () => { items.splice(i, 1); onChange(items); draw(); }, text: '×' }));
@@ -1155,7 +1320,7 @@ function pokemonEditor(list, onChange, disabled, allMine = false) {
       }
       wrap.append(wrapRow);
     });
-    const input = el('input', { list: 'dexNames', placeholder: 'Add Pokémon, e.g. Mega Gengar', 'aria-label': 'Pokémon name', disabled });
+    const input = el('input', { list: 'dexNames', placeholder, 'aria-label': 'Pokémon name', disabled });
     const act = actSelect('raid');
     const add = () => {
       const name = input.value.trim();
@@ -1171,6 +1336,101 @@ function pokemonEditor(list, onChange, disabled, allMine = false) {
   };
   draw();
   return wrap;
+}
+
+// Trainer meetups for an event: host, venue and times (wall time in HOME.tz), edited in place on `ev.hosts`.
+function hostsEditor(ev) {
+  const wrap = el('div', { class: 'hosts' });
+  // The event's start / end as now in the form, as SGT wall time (the form shows city time for overseas events).
+  const formTime = (id) => {
+    const v = $(id).value;
+    const z = zoneOf({ ...ev, tz: $('evTz').value });
+    return !v ? '' : z === HOME.tz ? v : utcToWall(wallToUtc(v, z), HOME.tz);
+  };
+  const fill = (h) => { h.start ||= formTime('evStart'); h.end ||= formTime('evEnd'); return h; };
+  ev.hosts.forEach(fill);
+  // Venues used in other meetups, with their map links: offered as suggestions, and an empty map link
+  // is filled in when the venue matches one (case and spacing ignored).
+  const venueKey = (v) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const known = new Map();
+  for (const e of (ownerData || data).events) {
+    for (const h of e.hosts || []) if (h.venue?.trim() && (!known.has(venueKey(h.venue)) || h.map)) known.set(venueKey(h.venue), { venue: h.venue.trim(), map: h.map || known.get(venueKey(h.venue))?.map || '' });
+  }
+  const venues = el('datalist', { id: 'venueNames' }, [...known.values()].map((k) => el('option', { value: k.venue })));
+  const draw = () => {
+    wrap.replaceChildren(venues, ...ev.hosts.map((h, i) => {
+      const map = el('input', { type: 'url', class: 'hostmap', placeholder: 'Map link for the venue (optional), e.g. https://maps.app.goo.gl/…', 'aria-label': 'Venue map link',
+        value: h.map || '', maxlength: '400', oninput: (e) => { h.map = e.target.value.trim(); } });
+      const suggestMap = () => {
+        const k = known.get(venueKey(h.venue));
+        if (!h.map && k?.map) { h.map = k.map; map.value = k.map; }
+      };
+      return el('div', { class: 'hostrow' },
+        el('input', { placeholder: 'Host trainer', 'aria-label': 'Host', value: h.host, maxlength: '60', oninput: (e) => { h.host = e.target.value; } }),
+        el('input', { placeholder: 'Venue, e.g. VivoCity', 'aria-label': 'Venue', value: h.venue, maxlength: '120', list: 'venueNames',
+          oninput: (e) => { h.venue = e.target.value; }, onchange: suggestMap }),
+        el('button', { class: 'btn icon', type: 'button', 'aria-label': 'Remove this meetup', text: '×', onclick: () => { ev.hosts.splice(i, 1); draw(); } }),
+        el('input', { type: 'datetime-local', 'aria-label': 'Meetup starts', value: h.start, onchange: (e) => { h.start = e.target.value; } }),
+        el('input', { type: 'datetime-local', 'aria-label': 'Meetup ends', value: h.end, onchange: (e) => { h.end = e.target.value; } }),
+        map,
+        // The meetup's own targets: shown on its days only (☆ to star).
+        el('div', { class: 'hostmons' }, pokemonEditor(h.pokemon || [], (list) => { h.pokemon = list; }, false, true, 'Target for this meetup only, e.g. Zacian (Crowned Sword)')));
+    }),
+    el('button', { class: 'btn', type: 'button', text: 'Add a meetup', onclick: () => {
+      ev.hosts.push(fill({ host: '', venue: '', start: '', end: '' })); draw();
+    } }));
+  };
+  draw();
+  return wrap;
+}
+// "Ash @ VivoCity, Sat 31 Oct 1:45 pm – 5:30 pm"
+// In tooltips, a meetup the user attends is marked.
+const meetText = (h) => `${hostText(h)}${h.campfire ? ` · ${h.campfire.going} going (Campfire)` : ''}${h.going ? ' · ✓ attending' : ''}`;
+// A Campfire meetup's own marks (attending, targets): saved by the server in the private store.
+// On the public site they stay in the visitor's browser (CF_MINE_KEY).
+async function saveCampfireMine(h, patch) {
+  const id = h.campfire.id;
+  const body = { going: h.going, pokemon: h.pokemon, ...patch };
+  const mine = STATIC ? { going: !!body.going, pokemon: body.pokemon || [] } : await api('PUT', `/api/campfire/${id}`, body);
+  const all = (data.campfire.mine ||= {});
+  if (!mine.going && !mine.pokemon.length) delete all[id]; else all[id] = mine;
+  if (STATIC) store.set(CF_MINE_KEY, all); else store.set(CACHE_KEY, { savedAt: Date.now(), data });
+  render();
+  if (selected) renderDay();
+}
+// Attending a meetup: saved on the event's `hosts` (private: not published).
+async function toggleGoing(ev, h) {
+  if (!canEdit()) return;
+  if (h.campfire) {
+    try { await saveCampfireMine(h, { going: !h.going }); } catch (e) { $('status').textContent = `Could not save: ${e.message}`; }
+    return;
+  }
+  const i = ev.hosts.indexOf(h);
+  const hosts = ev.hosts.map((x, j) => (j === i ? { ...x, going: !x.going } : x));
+  try {
+    const saved = markStars(await backend.updateEvent(ev.id, { hosts }));
+    const k = data.events.findIndex((x) => x.id === saved.id);
+    if (k >= 0) data.events[k] = saved;
+    if (!STATIC) store.set(CACHE_KEY, { savedAt: Date.now(), data });
+    render();
+    if (selected) renderDay();
+  } catch (e) { $('status').textContent = `Could not save: ${e.message}`; }
+}
+// Right-click on a day's meetup pin: one meetup is marked directly; several open the day to choose.
+function goingFromPin(day, meets) {
+  if (!canEdit()) return;
+  $('tip').hidden = true;
+  if (meets.length === 1) return toggleGoing(meets[0].ev, meets[0].h);
+  openDay(day);
+  $('status').textContent = 'Several meetups that day: press "Attending?" on the one you\'re going to.';
+}
+function hostText(h) {
+  const s = h.start ? wallToUtc(h.start, HOME.tz) : NaN;
+  const e = h.end ? wallToUtc(h.end, HOME.tz) : NaN;
+  const full = (ms) => `${fmt(ms, { weekday: 'short' })} ${fmtDate(ms)} ${fmtTime(ms)}`;
+  const when = Number.isNaN(s) ? '' : `${full(s)}${Number.isNaN(e) ? ''
+    : ` – ${h.end.slice(0, 10) === h.start.slice(0, 10) ? fmtTime(e) : full(e)}`}`;
+  return [[h.host, h.venue].filter(Boolean).join(' @ '), when].filter(Boolean).join(', ');
 }
 
 // ---------- event editor ----------
@@ -1204,6 +1464,8 @@ function openEditor(ev) {
   $('evPublicRow').hidden = STATIC;
   updateZoneHint();
   $('evPokemon').replaceChildren(pokemonEditor(editing.pokemon, (list) => { editing.pokemon = list; }, false));
+  editing.hosts = (ev.hosts || []).map((h) => ({ ...h }));
+  $('evHosts').replaceChildren(hostsEditor(editing));
   const ownChanges = STATIC ? !!ev.local : (ev.edited?.length > 0);
   $('evRevert').hidden = isNew || (ev.source !== 'user' && !ownChanges);
   $('evRevert').textContent = ev.source === 'user' ? (STATIC && ev.published ? 'Hide from my view' : 'Delete') : 'Undo my changes';
@@ -1230,11 +1492,13 @@ async function saveEditor(e) {
     end: $('evEnd').value === toInput(editing, editing.end) ? (editing.end || '') : $('evEnd').value,
     note: $('evNote').value,
     hidden: $('evHidden').checked,
-    pokemon: editing.pokemon,
+    pokemon: editing.pokemon.map((p) => (p.mine ? p : (({ star: _s, ...q }) => q)(p))),
+    starred: editing.pokemon.filter((p) => !p.mine && p.star).map(starKey),
+    hosts: editing.hosts.filter((h) => h.host.trim() || h.venue.trim()),
     ...(STATIC ? {} : { public: $('evPublic').checked }),
   };
   try {
-    const saved = editing.id ? await backend.updateEvent(editing.id, body) : await backend.addEvent(body);
+    const saved = markStars(editing.id ? await backend.updateEvent(editing.id, body) : await backend.addEvent(body));
     const i = data.events.findIndex((x) => x.id === saved.id);
     if (i >= 0) data.events[i] = saved; else data.events.push(saved);
     if (!STATIC) store.set(CACHE_KEY, { savedAt: Date.now(), data });
@@ -1259,7 +1523,7 @@ async function revertEditor() {
   try {
     const r = await backend.revert(editing.id);
     if (r.deleted) data.events = data.events.filter((x) => x.id !== editing.id);
-    else data.events[data.events.findIndex((x) => x.id === r.id)] = r;
+    else data.events[data.events.findIndex((x) => x.id === r.id)] = markStars(r);
     $('editor').close();
     render();
   } catch (err) {
@@ -1292,6 +1556,7 @@ $('prev').onclick = () => shiftMonth(-1);
 $('next').onclick = () => shiftMonth(1);
 $('today').onclick = () => { prefs.month = null; savePrefs(); render(); };
 $('bars').onchange = (e) => { prefs.bars = e.target.checked; savePrefs(); render(); };
+$('campfire').onchange = (e) => { prefs.campfire = e.target.checked; savePrefs(); render(); if (selected) renderDay(); };
 $('refresh').onclick = async () => {
   try { await api('POST', '/api/refresh'); data.refreshing = true; render(); setTimeout(load, 3000); }
   catch (e) { $('status').textContent = `Could not start a check: ${e.message}`; }
@@ -1330,6 +1595,7 @@ $('helpExtras').append(
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, globePin('event location')),
     'Location Background: a photo of the event city, in-person raids / Max Battles only (left)'),
   el('span', { class: 'help-pin' }, debutBadge({ debut: 'new' }), 'Pokémon GO debut (gold: shiny debut)'),
+  el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, meetPin()), 'trainer meetup that day (beside the date; hover for host, venue and time; right-click to mark it as attending, which circles the pin)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, lockPin('emea')), 'region-locked, another region (top-left)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, lockPin('apac')), 'region-locked, your region'));
 $('helpBtn').onclick = () => $('help').showModal();
