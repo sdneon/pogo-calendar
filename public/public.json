@@ -1,5 +1,5 @@
 {
- "publishedAt": 1793110267844,
+ "publishedAt": 1793280900407,
  "events": {
   "2026-10-31-chandelure-super-mega-raid-day-2026": {
    "edited": [],
@@ -32,6 +32,42 @@
        "dex": 888,
        "icon": "",
        "act": "raid",
+       "shiny": false,
+       "bg": false,
+       "region": "",
+       "mine": true,
+       "star": true,
+       "comment": ""
+      },
+      {
+       "name": "Zamazenta (Crowned Shield)",
+       "dex": 889,
+       "icon": "",
+       "act": "raid",
+       "shiny": false,
+       "bg": false,
+       "region": "",
+       "mine": true,
+       "star": true,
+       "comment": ""
+      },
+      {
+       "name": "Latias",
+       "dex": 380,
+       "icon": "",
+       "act": "dmax",
+       "shiny": false,
+       "bg": false,
+       "region": "",
+       "mine": true,
+       "star": true,
+       "comment": ""
+      },
+      {
+       "name": "Latios",
+       "dex": 381,
+       "icon": "",
+       "act": "dmax",
        "shiny": false,
        "bg": false,
        "region": "",
@@ -71,6 +107,17 @@
      "map": "https://www.google.com/maps/place/Kallang+Wave+Mall/@1.3026723,103.8711892,17z/data=!3m2!4b1!5s0x31da18497254e545:0x821482169ed856cb!4m6!3m5!1s0x31da184bf725078d:0xdba7455a8b6edfd1!8m2!3d1.3026669!4d103.8737641!16s%2Fg%2F11hdc2ys1t?entry=ttu&g_ep=EgoyMDI2MTAyMC4wIKXMDSoASAFQAw%3D%3D"
     }
    ]
+  },
+  "2026-11-21-eternamax-eternatus-max-battles-2026": {
+   "edited": [],
+   "note": "",
+   "hidden": false,
+   "tier": "",
+   "tz": "",
+   "starred": [
+    "Eternamax Eternatus|dmax"
+   ],
+   "hosts": []
   }
  },
  "days": {},
