@@ -1032,7 +1032,7 @@ function renderWeek(monday, month, todayKey) {
     const color = tierOf(ev) === 'weekly' || ev.of ? (ACTIVITIES[act] || ACTIVITIES.event).color : 'var(--muted)';
     const startsHere = onDay(ev, days[a]) && homeDay(evRange(ev)[0]) === days[a];
     const btn = el('button', {
-      class: `bar${startsHere ? ' starts' : ''}${homeDay(evRange(ev)[1] - 1) === days[b] ? ' ends' : ''}`,
+      class: `bar${startsHere ? ' starts' : ''}${homeDay(evRange(ev)[1] - 1) === days[b] ? ' ends' : ''}`, 'data-ev': ev.id,
       style: `grid-column:${a + 1} / ${b + 2};grid-row:${lane + 2};--bar:${color}`,
       'aria-label': `${ev.title}, ${barWhen(ev)}`, onclick: () => openEditor(ev.of || ev),
     }, el('span', { text: ev.title }));
@@ -1281,6 +1281,9 @@ function showTip(target, x, y) {
 document.addEventListener('mouseover', (e) => {
   const m = e.target.closest?.('.mon, .bar, .evtip, .meet');
   if (m) showTip(m, e.clientX, e.clientY); else $('tip').hidden = true;
+  // Hovering a bar lights all of that event's bars.
+  const id = e.target.closest?.('.bar')?.dataset.ev;
+  for (const b of document.querySelectorAll('.bar')) b.classList.toggle('lit', !!id && b.dataset.ev === id);
 });
 document.addEventListener('scroll', () => { $('tip').hidden = true; }, true);
 

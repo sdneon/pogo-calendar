@@ -182,6 +182,7 @@ main { margin-top: 12px; overflow-x: auto; }
 .bar.starts { border-left-color: var(--bar); border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
 .bar.ends { border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
 .bar span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.bar.lit { z-index: 2; background: color-mix(in srgb, var(--bar) 60%, var(--surface)); box-shadow: 0 0 0 1px var(--bar), 0 0 6px var(--bar); font-weight: 700; }
 
 /* ---------- Pokémon icon ---------- */
 .mon { --s: 40px; position: relative; width: var(--s); height: var(--s); flex: none; }

@@ -1,5 +1,5 @@
 {
- "publishedAt": 1793591315661,
+ "publishedAt": 1793593539572,
  "events": {
   "2026-10-31-chandelure-super-mega-raid-day-2026": {
    "edited": [],
@@ -210,6 +210,38 @@
    "end": "2026-11-12T19:00",
    "url": "",
    "tier": "",
+   "tz": "",
+   "starred": [],
+   "hosts": []
+  },
+  "u-6c0717dd-c346-42e6-ae5e-0c826939ebe4": {
+   "id": "u-6c0717dd-c346-42e6-ae5e-0c826939ebe4",
+   "source": "user",
+   "edited": [],
+   "note": "Visit 5 locations in Changi Airport & Jewel for a chance to encounter PokeXciting! Pikachu.",
+   "hidden": false,
+   "pokemon": [
+    {
+     "name": "PokéXciting! Pikachu (Blue)",
+     "dex": 25,
+     "icon": "https://cdn.leekduck.com/assets/img/pokemon_icons/pm25.fANNIVERSARY_2026_SINGAPORE_01.icon.png",
+     "act": "event",
+     "shiny": false,
+     "bg": false,
+     "region": "",
+     "mine": true,
+     "star": false,
+     "comment": "PokéXciting! Pikachu (Blue) featuring a local Location Background"
+    }
+   ],
+   "typeLabel": "",
+   "image": "",
+   "title": "GO Stamp Rally @ Changi Airport & Jewel",
+   "type": "event",
+   "start": "2026-11-07T10:00",
+   "end": "2026-12-08T22:00",
+   "url": "https://pokemongo.com/news/event-singapore-30th-anniversary-2026",
+   "tier": "weekly",
    "tz": "",
    "starred": [],
    "hosts": []

@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const { scrape } = require('../lib/scrape');
-const { CDN, iconFile } = require('../lib/iconfile');
+const { CDN, iconFile, publishedIcons } = require('../lib/iconfile');
 const { fetchCampfire } = require('../lib/campfire');
 
 const ROOT = path.join(__dirname, '..');
@@ -98,6 +98,8 @@ async function main() {
       if (p.dex) urls.add(`${SPRITES}pm${p.dex}.icon.png`);
     }
   }
+  // The owner's published icons too: Leek Duck's CDN isn't CORS-open, so the page can't crop them from there.
+  for (const url of publishedIcons(JSON.parse(fs.readFileSync(path.join(SITE, 'public.json'), 'utf8')))) urls.add(url);
   global.window = {};
   require(path.join(ROOT, 'public', 'pokedex.js'));
   for (const [dex, , cls] of window.POGO_DEX) if (cls) urls.add(`${SPRITES}pm${dex}.icon.png`);
