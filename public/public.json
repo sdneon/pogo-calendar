@@ -1,5 +1,5 @@
 {
- "publishedAt": 1793280900407,
+ "publishedAt": 1793591315661,
  "events": {
   "2026-10-31-chandelure-super-mega-raid-day-2026": {
    "edited": [],
@@ -74,11 +74,98 @@
        "mine": true,
        "star": true,
        "comment": ""
+      },
+      {
+       "name": "Meltan",
+       "dex": 808,
+       "icon": "",
+       "act": "dmax",
+       "shiny": false,
+       "bg": false,
+       "region": "",
+       "mine": true,
+       "star": true,
+       "comment": ""
+      },
+      {
+       "name": "Regidrago",
+       "dex": 895,
+       "icon": "",
+       "act": "dmax",
+       "shiny": false,
+       "bg": false,
+       "region": "",
+       "mine": true,
+       "star": true,
+       "comment": ""
       }
      ]
     }
    ],
    "meetupsOnly": true
+  },
+  "2026-11-01-raidhour20261125": {
+   "edited": [
+    "pokemon"
+   ],
+   "pokemon": [
+    {
+     "name": "Deoxys (Normal, Defense, Attack, and Speed Formes)",
+     "dex": 386,
+     "icon": "",
+     "act": "raid",
+     "shiny": true,
+     "bg": false,
+     "region": "",
+     "fromTitle": true
+    },
+    {
+     "name": "Deoxys (Defense)",
+     "dex": 386,
+     "icon": "",
+     "act": "raid",
+     "shiny": false,
+     "bg": false,
+     "region": "",
+     "mine": true,
+     "star": false,
+     "comment": ""
+    },
+    {
+     "name": "Deoxys (Attack)",
+     "dex": 386,
+     "icon": "",
+     "act": "raid",
+     "shiny": false,
+     "bg": false,
+     "region": "",
+     "mine": true,
+     "star": true,
+     "comment": ""
+    },
+    {
+     "name": "Deoxys (Speed)",
+     "dex": 386,
+     "icon": "",
+     "act": "raid",
+     "shiny": false,
+     "bg": false,
+     "region": "",
+     "mine": true,
+     "star": false,
+     "comment": ""
+    }
+   ],
+   "note": "",
+   "hidden": false
+  },
+  "2026-11-21-eternamax-eternatus-max-battles-2026": {
+   "edited": [],
+   "note": "",
+   "hidden": false,
+   "starred": [
+    "Eternamax Eternatus|dmax"
+   ]
   },
   "u-0bfb1bf4-f735-4778-975d-d19d7f154f76": {
    "id": "u-0bfb1bf4-f735-4778-975d-d19d7f154f76",
@@ -108,15 +195,23 @@
     }
    ]
   },
-  "2026-11-21-eternamax-eternatus-max-battles-2026": {
+  "u-67132400-8ab9-425d-bdca-05193b5eb027": {
+   "id": "u-67132400-8ab9-425d-bdca-05193b5eb027",
+   "source": "user",
    "edited": [],
    "note": "",
    "hidden": false,
+   "pokemon": [],
+   "typeLabel": "",
+   "image": "",
+   "title": "Cresselia + Darkrai raid hour (6-7pm)",
+   "type": "event",
+   "start": "2026-11-12T18:00",
+   "end": "2026-11-12T19:00",
+   "url": "",
    "tier": "",
    "tz": "",
-   "starred": [
-    "Eternamax Eternatus|dmax"
-   ],
+   "starred": [],
    "hosts": []
   }
  },
@@ -145,6 +240,22 @@
      "dex": 484,
      "icon": "",
      "act": "dmax",
+     "shiny": false,
+     "bg": false,
+     "region": "",
+     "mine": true,
+     "star": true,
+     "comment": ""
+    }
+   ]
+  },
+  "3b2ce83c-a289-4707-986b-de5e1340a86b": {
+   "pokemon": [
+    {
+     "name": "Zamazenta (Crowned Shield)",
+     "dex": 889,
+     "icon": "",
+     "act": "raid",
      "shiny": false,
      "bg": false,
      "region": "",

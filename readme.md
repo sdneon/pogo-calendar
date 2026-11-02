@@ -19,7 +19,10 @@ Open the [calendar page](https://sdneon.github.io/pogo-calendar/). The **?** but
   - bottom-left: BG when a special background is mentioned;
   - left edge: a wireframe globe 🌐 for a **Location Background** (a photo of the event's city, e.g. Sendai). These usually come only from in-person raids and Max Battles at that event, sometimes for ticket holders only, and never to remote players;
   - top: **NEW** for a Pokémon GO debut, gold for a shiny debut;
+  - top-left: a clock with the hour's slice filled for a **Raid Hour or Max Battle Hour** on that day (usually 6–7 pm), or a lamp for a **Spotlight Hour**;
   - top-left: a padlock when the Pokémon is region-locked. It's teal for Asia-Pacific and orange for another region.
+
+  Beside the date, **R30** shows that day's Remote Raid limit from an event's bonuses, and **R∞** means no limit.
 
   Tap a pin in the legend to hide that activity.
 - **Hover an icon** for a bigger picture with details:

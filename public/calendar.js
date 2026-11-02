@@ -342,11 +342,14 @@ function ago(ms) {
 }
 
 // ---------- tiers ----------
+// How many different Pokémon make a brand-new debut (a shiny debut doesn't count).
+const newDebuts = (ev) => new Set((ev.pokemon || []).filter((p) => p.debut === 'new').map((p) => p.name)).size;
 function autoTier(ev) {
   const title = (ev.title || '').toLowerCase();
   const span = spanDays(ev);
   if (SUPER_TYPES.test(ev.type) || /go fest|go tour|wild area/.test(title)) return 'super';
   if (MAJOR_TYPES.test(ev.type) || /raid day|max battle day|hatch day|research day/.test(title)) return 'major';
+  if (ev.type === 'event' && span > 1.5 && span <= SEASON_DAYS && newDebuts(ev) >= 2) return 'major';
   if (ev.type === 'raid-battles' || (span > 1.5 && (ev.pokemon || []).some((p) => RAID_ACTS.has(p.act)) && ev.type !== 'event')) return 'weekly';
   return 'minor';
 }
@@ -727,6 +730,66 @@ function globePin(place) {
   }
   return svg;
 }
+// Dated Raid / Max Battle hours of a Pokémon: its own, its event's entry, or a short Raid Hour-type event's window.
+const HOUR_LABEL = { raid: 'Raid Hour', max: 'Max Battle Hour' };
+// Listed hours: the Pokémon's own, or those of the same Pokémon in the event's list or Leek Duck's copy.
+function listedHours(p, ev) {
+  if (p.hours?.length) return p.hours;
+  return [...(ev?.pokemon || []), ...(ev?.ld?.pokemon || [])].find((q) => q.hours?.length && monKey(q) === monKey(p))?.hours || [];
+}
+function hoursOf(p, ev) {
+  const listed = listedHours(p, ev);
+  if (listed.length || !ev) return listed;
+  if (!/^(raid-hour|max-battles)$/.test(ev.type) || !RAID_ACTS.has(p.act) || !ev.start || !ev.end || HAS_ZONE.test(ev.start)) return [];
+  const span = Date.parse(ev.end) - Date.parse(ev.start);
+  if (!(span > 0 && span <= 2 * 3600e3)) return [];
+  return [{ kind: MAX_ACTS.has(p.act) ? 'max' : 'raid', date: ev.start.slice(0, 10), from: ev.start.slice(11, 16), to: ev.end.slice(11, 16) }];
+}
+// An hour's window, from wall-clock time in the event's zone.
+const hourRange = (h, ev) => { const tz = ev ? zoneOf(ev) : HOME.tz; return [wallToUtc(`${h.date}T${h.from}`, tz), wallToUtc(`${h.date}T${h.to}`, tz)]; };
+const hourDay = (h, ev) => homeDay(hourRange(h, ev)[0]);
+function hourText(h, ev) {
+  const [s, e] = hourRange(h, ev);
+  return `${HOUR_LABEL[h.kind]}: ${fmt(s, { weekday: 'short', day: 'numeric', month: 'short' })}, ${fmtTime(s)} – ${fmtTime(e)}`;
+}
+// Hour mark: a clock face with the hour's slice filled (top-left).
+function hourPin(h) {
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 14 14');
+  svg.setAttribute('class', 'hourpin');
+  svg.setAttribute('aria-label', `${HOUR_LABEL[h.kind]} ${h.from}–${h.to}`);
+  const turn = (t) => { const [a, b] = t.split(':').map(Number); return ((a % 12) + b / 60) / 12 * 2 * Math.PI; };
+  const at = (r) => `${(7 + 6 * Math.sin(r)).toFixed(2)} ${(7 - 6 * Math.cos(r)).toFixed(2)}`;
+  const a = turn(h.from);
+  const b = turn(h.to);
+  const large = ((b - a + 2 * Math.PI) % (2 * Math.PI)) > Math.PI ? 1 : 0;
+  const part = (tag, attrs) => { const n = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); svg.append(n); };
+  part('circle', { cx: 7, cy: 7, r: 6, class: 'face' });
+  part('path', { d: `M7 7L${at(a)}A6 6 0 ${large} 1 ${at(b)}Z`, class: 'slice' });
+  part('path', { d: 'M7 1v2', class: 'tick' });
+  part('circle', { cx: 7, cy: 7, r: 6, class: 'rim' });
+  return svg;
+}
+// Spotlight Hour mark: a table lamp (top-left).
+function lampPin() {
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 14 14');
+  svg.setAttribute('class', 'lamppin');
+  svg.setAttribute('aria-label', 'Spotlight Hour');
+  for (const [d, cls] of [['M4.6 1h4.8L12 7.4H2Z', 'shade'], ['M7 7.4v4.4M4 12.6h6', 'stand']]) {
+    const path = document.createElementNS(SVGNS, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('class', cls);
+    svg.append(path);
+  }
+  return svg;
+}
+// That day's Remote Raid limit from any event's bonuses, the most generous first (limit 0: no limit).
+function dayRemote(day) {
+  const all = visibleEvents().flatMap((ev) => (ev.remote || ev.ld?.remote || []).filter((r) => r.from <= day && day <= r.to).map((r) => ({ ...r, ev })));
+  return all.sort((a, b) => (a.limit === 0 ? Infinity : a.limit) < (b.limit === 0 ? Infinity : b.limit) ? 1 : -1)[0] || null;
+}
+const remoteText = (r) => (r.limit ? `Remote Raid limit: ${r.limit}` : 'No Remote Raid limit');
 // Meetup mark: a map pin, beside the date of a day with a trainer meetup.
 function meetPin() {
   const svg = document.createElementNS(SVGNS, 'svg');
@@ -757,7 +820,7 @@ const dayMeetups = (day) => [...visibleEvents().flatMap((ev) => (ev.hosts || [])
 // stand-in named after Campfire's game event.
 let CF = []; // rebuilt by render()
 // Order of Campfire meetups in lists: attended first, then these hosts (display names, any case), then by start.
-const CF_PRIORITY_HOSTS = ['Sreebha'];
+const CF_PRIORITY_HOSTS = ['Sreebha', 'Huggable'];
 const cfPriority = (h) => CF_PRIORITY_HOSTS.some((n) => n.toLowerCase() === String(h.host).toLowerCase());
 const cfOrder = (a, b) => !!b.h.going - !!a.h.going || cfPriority(b.h) - cfPriority(a.h) || a.h.start.localeCompare(b.h.start);
 const cfNorm = (s) => String(s || '').toLowerCase().replace(/\s+day\s*\d+\s*$/, '').replace(/[^a-z0-9]+/g, '');
@@ -792,13 +855,16 @@ function regionWindows(ev, region) {
 }
 const fmtDayTime = (ms) => fmt(ms, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 const TIP = new WeakMap(); // icon element -> {p, ev}
-function monIcon(p, ev, size = '') {
+// `day` (calendar cells): the hour mark shows only on the hour's own day.
+function monIcon(p, ev, size = '', day = '') {
   const urls = iconUrls(p);
+  const hour = hoursOf(p, ev).find((h) => !day || hourDay(h, ev) === day);
   const noimg = () => el('span', { class: 'noimg', text: p.name });
   const img = urls.length ? el('img', { alt: p.name, onerror: (e) => e.target.replaceWith(noimg()) }) : noimg();
   if (urls.length) trimmed(urls).then((u) => { if (u) img.src = u; else img.replaceWith(noimg()); });
   const n = el('span', { class: ['mon', size, p.star && 'star', p.mine && 'mine'].filter(Boolean).join(' '), 'aria-label': p.name },
     img, pin(p.act), p.shiny ? sparkle() : null, p.bg ? el('span', { class: 'bgpin', text: 'BG' }) : null,
+    hour ? hourPin(hour) : p.act === 'spotlight' ? lampPin() : null,
     REGIONS[p.region] ? lockPin(p.region) : null, p.lbg ? globePin(p.lbg) : null, p.debut ? debutBadge(p) : null);
   TIP.set(n, { p, ev });
   return n;
@@ -839,16 +905,37 @@ function dayInfo(day) {
   for (const ev of evs) if (short(ev)) for (const p of eventPokemon(ev)) if (p.star) take(null, main, p, ev);
   for (const { p, ev } of meetTargets) take(null, main, p, ev);
   for (const p of dayTargets) take(null, main, p, evOf(p));
+  // Pokémon with a Raid / Max Battle hour that day, whatever the event's tier.
+  const hourEvs = new Map(); // event -> the hour's start, for its line on the cell
+  const localFirst = (a, b) => isOverseas(a) - isOverseas(b);
+  // A multi-day major "event" focuses each day: that day's hours and first-day debuts; the rest stay in the day panel.
+  const focused = (ev) => ev.type === 'event' && spanDays(ev) > 1.5;
+  for (const ev of [...evs].sort(localFirst)) {
+    if (!short(ev)) continue;
+    for (const p of eventPokemon(ev)) {
+      const h = hoursOf(p, ev).find((x) => hourDay(x, ev) === day);
+      if (!h || !shownAct(p)) continue;
+      take(null, main, p, ev);
+      if (tierOf(ev) !== 'super' && !isOverseas(ev) && !hourEvs.has(ev)) hourEvs.set(ev, hourRange(h, ev)[0]);
+    }
+  }
+  // Debuts of minor and focused events on the first day, ahead of big events' lists (a debut with its own hour shows on that day instead).
+  let minorTargets = 0;
+  for (const ev of [...by.minor, ...by.major.filter(focused)]) {
+    if (!short(ev) || homeDay(evRange(ev)[0]) !== day) continue;
+    for (const p of eventPokemon(ev)) if (p.debut && !hoursOf(p, ev).length) { take(null, main, p, ev); minorTargets++; }
+  }
   // Super and overseas events list dozens of spawns: only raid bosses, valuable and user-added ones go on the cell.
-  for (const ev of [...by.super, ...by.major]) {
+  // Local events come before overseas ones.
+  for (const ev of [...by.super, ...by.major].sort(localFirst)) {
     if (spanDays(ev) > SEASON_DAYS) continue;
     const big = by.super.includes(ev) || isOverseas(ev);
-    const mons = eventPokemon(ev).filter((p) => !big || p.mine || p.star || isValuable(p) || RAID_ACTS.has(p.act) || p.act === 'cd' || p.debut)
+    const focus = by.major.includes(ev) && focused(ev);
+    const mons = eventPokemon(ev).filter((p) => (focus ? p.mine || p.star : !big || p.mine || p.star || isValuable(p) || RAID_ACTS.has(p.act) || p.act === 'cd' || p.debut))
       .sort((a, b) => !!b.star - !!a.star || !!b.mine - !!a.mine || !!b.debut - !!a.debut || isValuable(b) - isValuable(a));
     for (const p of mons) take(null, main, p, ev);
   }
-  // Minor events stay off the cell, except Pokémon the user starred or added.
-  let minorTargets = 0;
+  // Minor events otherwise stay off the cell, except Pokémon the user starred or added.
   for (const ev of by.minor) {
     if (spanDays(ev) > SEASON_DAYS) continue;
     for (const p of eventPokemon(ev)) if (p.star || p.mine) { take(null, main, p, ev); minorTargets++; }
@@ -859,11 +946,11 @@ function dayInfo(day) {
   const weeklyStar = corner.some(({ p }) => (p.act === 'shadow' && classOf(p)) || p.star);
   const userDay = data.days[day];
   return {
-    evs, by, main, corner,
+    evs, by, main, corner, hourEvs,
     super: by.super.filter((ev) => !isOverseas(ev)),
     overseas: [...by.super, ...by.major].filter(isOverseas),
     rest: !!userDay?.rest,
-    mundane: !by.super.length && !by.major.length && !weeklyStar && !minorTargets && !meetTargets.length
+    mundane: !by.super.length && !by.major.length && !weeklyStar && !minorTargets && !meetTargets.length && !hourEvs.size
       && !main.some(({ p }) => p.star) && !(userDay?.pokemon || []).length,
   };
 }
@@ -922,7 +1009,7 @@ function renderWeek(monday, month, todayKey) {
     const evs = [...visibleEvents().filter((ev) => {
       const t = tierOf(ev);
       const span = spanDays(ev);
-      return t === 'weekly' || (t === 'minor' && ev.type === 'event' && !isOverseas(ev) && span > 1.5 && span <= SEASON_DAYS);
+      return t === 'weekly' || ((t === 'minor' || t === 'major') && ev.type === 'event' && !isOverseas(ev) && span > 1.5 && span <= SEASON_DAYS);
     }), ...weekBars].filter((ev) => days.some((d) => onDay(ev, d)))
       .sort((a, b) => barRank(a) - barRank(b) || evRange(a)[0] - evRange(b)[0]);
     // Max Monday week bars always get a lane: other bars leave one free for each week bar still to come.
@@ -958,10 +1045,19 @@ function renderWeek(monday, month, todayKey) {
 function renderCell(key, col, month, todayKey) {
   const info = dayInfo(key);
   const max = 6;
-  const cls = ['cell', col >= 5 && 'weekend', key.slice(0, 7) !== month && 'other', key === todayKey && 'today', key === selected && 'selected',
-    info.rest ? 'rest' : info.super.length ? 'super' : info.overseas.length ? 'overseas' : info.mundane && 'mundane'];
+  // A local major event outranks overseas ones: no overseas colour, and their names go below it.
   const majors = info.by.major.filter((ev) => !isOverseas(ev));
-  const majorNames = majors.map((ev, i) => [i ? ' · ' : '', evTip(el('span', { text: `${fmtTime(evRange(ev)[0])} ${ev.title}` }), ev)]);
+  const localMajors = majors.length > 0;
+  const cls = ['cell', col >= 5 && 'weekend', key.slice(0, 7) !== month && 'other', key === todayKey && 'today', key === selected && 'selected',
+    info.rest ? 'rest' : info.super.length ? 'super' : info.overseas.length && !localMajors ? 'overseas' : info.mundane && 'mundane'];
+  // That day's hour, else the start on the first day; later days of a long event have no time.
+  const lines = [...majors.map((ev) => [ev, info.hourEvs.get(ev) ?? (homeDay(evRange(ev)[0]) === key ? evRange(ev)[0] : null)]),
+    ...[...info.hourEvs].filter(([ev]) => !majors.includes(ev))];
+  const majorNames = lines.map(([ev, at], i) => [i ? ' · ' : '', evTip(el('span', { text: `${at === null ? '' : `${fmtTime(at)} `}${ev.title}` }), ev)]);
+  const overseasNames = info.overseas.map((ev) => evTip(el('span', { class: `overseasname${localMajors ? ' behind' : ''}`, text: `✈ ${ev.title}` }), ev));
+  const remote = dayRemote(key);
+  const remoteMark = remote ? evTip(el('span', { class: `remotechip${remote.limit ? '' : ' nolimit'}`, 'aria-label': remoteText(remote),
+    text: remote.limit ? `R${remote.limit}` : 'R∞' }), remote.ev) : null;
   const meets = dayMeetups(key);
   const going = meets.some(({ h }) => h.going);
   const meetMark = meets.length ? el('span', { class: `meet${going ? ' going' : ''}`,
@@ -970,18 +1066,19 @@ function renderCell(key, col, month, todayKey) {
     meets.length > 1 ? el('span', { text: meets.length }) : null) : null;
   if (meetMark) MEET_TIP.set(meetMark, meets);
   // Cell icons know their day, so their tooltip lists that day's meetups.
-  const cellMon = (p, ev, size) => { const n = monIcon(p, ev, size); TIP.get(n).day = key; return n; };
+  const cellMon = (p, ev, size) => { const n = monIcon(p, ev, size, key); TIP.get(n).day = key; return n; };
   return el('button', {
     class: cls.filter(Boolean).join(' '), style: `grid-column:${col + 1}`, 'data-day': key,
     'aria-label': `${key}${info.rest ? ', rest day' : ''}`, onclick: () => (selected ? $('dayClose').click() : openDay(key)),
   },
-  el('span', { class: 'date' }, el('span', { class: 'daynum' }, el('span', { text: +key.slice(8) }), meetMark),
+  el('span', { class: 'date' }, el('span', { class: 'daynum' }, el('span', { text: +key.slice(8) }), meetMark, remoteMark),
     info.rest ? el('span', { class: 'badge', text: 'Rest' }) : null),
   info.super.map((ev) => evTip(el('span', { class: 'supername', text: ev.title }), ev)),
-  info.overseas.map((ev) => evTip(el('span', { class: 'overseasname', text: `✈ ${ev.title}` }), ev)),
+  localMajors ? null : overseasNames,
   el('span', { class: 'mons' }, info.main.slice(0, max).map(({ p, ev }) => cellMon(p, ev)),
     info.main.length > max ? el('span', { class: 'more', text: `+${info.main.length - max}` }) : null),
   majorNames.length ? el('span', { class: 'evcount' }, majorNames.flat()) : null,
+  localMajors ? overseasNames : null,
   info.corner.length ? el('span', { class: 'corner' }, info.corner.slice(0, 5).map(({ p, ev }) => cellMon(p, ev, 'small'))) : null);
 }
 
@@ -1041,6 +1138,7 @@ function tipContent({ p, ev, day }) {
   }
   const bonus = ev && (ev.bonus || ev.ld?.bonus);
   if (bonus) rows.push(el('div', { class: 'tip-bonus', text: `Bonus: ${bonus}` }));
+  for (const hr of hoursOf(p, ev)) rows.push(el('div', { class: 'tip-hour' }, hourPin(hr), el('span', { text: hourText(hr, ev) })));
   if (h) {
     rows.push(el('div', { class: 'tip-cp' }, el('span', { text: 'Hundo catch CP' }),
       el('b', { text: String(h.cp20) }), h.cp25 ? el('span', { class: 'muted', text: `· weather boosted ${h.cp25}` }) : null));
@@ -1213,8 +1311,12 @@ function renderDay() {
   const box = $('dayEvents');
   box.replaceChildren();
   const order = { super: 0, major: 1, weekly: 2, minor: 3 };
+  // An overseas event sits below local events of the next tier down.
+  const rank = (ev) => order[tierOf(ev)] + (isOverseas(ev) ? 1.5 : 0);
   const evs = data.events.filter((ev) => onDay(ev, key))
-    .sort((a, b) => order[tierOf(a)] - order[tierOf(b)] || mineFirst(a, b) || evRange(a)[0] - evRange(b)[0]);
+    .sort((a, b) => rank(a) - rank(b) || mineFirst(a, b) || evRange(a)[0] - evRange(b)[0]);
+  const remote = dayRemote(key);
+  if (remote) box.append(el('div', { class: 'tip-bonus day-remote', text: `${remoteText(remote)} (${remote.ev.title})` }));
   if (!evs.length) box.append(el('p', { class: 'muted', text: 'No events on this day.' }));
   for (const ev of evs) box.append(evCard(ev, false));
 
@@ -1244,6 +1346,19 @@ function cfCard(h, ev) {
 function evCard(ev, inTip) {
   const tier = tierOf(ev);
   const bonus = ev.bonus || ev.ld?.bonus;
+  const bonuses = ev.bonuses || ev.ld?.bonuses || [];
+  const bonusNotes = ev.bonusNotes || ev.ld?.bonusNotes || [];
+  // Dated hours, one line each, with the Pokémon of that hour (not for an event that is itself one hour).
+  const hourLines = new Map();
+  for (const p of eventPokemon(ev)) {
+    for (const h of listedHours(p, ev)) {
+      const k = `${h.date}|${h.from}|${h.kind}`;
+      if (!hourLines.has(k)) hourLines.set(k, { h, names: [] });
+      hourLines.get(k).names.push(p.name);
+    }
+  }
+  const hourRows = [...hourLines.values()].sort((a, b) => a.h.date.localeCompare(b.h.date))
+    .map(({ h, names }) => el('div', { class: 'tip-hour' }, hourPin(h), el('span', { text: `${hourText(h, ev)}: ${names.join(', ')}` })));
   return el('div', { class: `evcard tier-${tier}${isOverseas(ev) ? ' is-overseas' : ''}${ev.hidden ? ' hidden-ev' : ''}` },
       el('div', { class: 't' }, pin(TYPE_ACT[ev.type] || 'event'), el('b', { text: ev.title }),
         el('span', { class: 'tag', text: TIER_LABEL[tier] }),
@@ -1260,7 +1375,10 @@ function evCard(ev, inTip) {
         return el('div', { class: 'region-line' }, lockPin(p.region),
           `${p.name} (${REGIONS[p.region].label})${w ? `: ${fmtDayTime(w.s)} – ${fmtDayTime(w.e)} ${HOME.label}` : ''}`);
       }),
+      ...hourRows,
       bonus ? el('div', { class: 'tip-bonus', text: `Bonus: ${bonus}` }) : null,
+      bonuses.length ? el('ul', { class: 'ev-bonuses' }, bonuses.map((b) => el('li', { text: b }))) : null,
+      ...bonusNotes.map((n) => el('div', { class: 'ev-bonusnote', text: n })),
       ev.note ? el('div', { class: 'evnote', text: ev.note }) : null,
       ...(ev.hosts || []).map((h) => el('div', { class: 'evhost' }, meetPin(), el('span', { text: `Meetup: ${hostText(h)}` }),
         /^https?:\/\//.test(h.map || '') && !inTip ? el('a', { href: h.map, target: '_blank', rel: 'noopener', text: 'Map' }) : null,
@@ -1312,6 +1430,61 @@ function regionSelect(value, onchange) {
   for (const [k, r] of Object.entries(REGIONS)) s.append(el('option', { value: k, selected: k === value, text: `🔒 ${r.label}` }));
   return s;
 }
+// Pokémon name suggestions, lined up with the input's left edge (a native datalist's position can't be set).
+const foldName = (s) => s.normalize('NFD').replace(/[̀-ͯ]|[()]/g, '').toLowerCase();
+let dexNames = null; // built on first use
+function suggestBox(input) {
+  const box = el('div', { class: 'suggest', role: 'listbox' });
+  box.hidden = true;
+  let at = -1;
+  const place = () => {
+    if (!input.isConnected) { close(); return; }
+    const r = input.getBoundingClientRect();
+    const below = innerHeight - r.bottom - 8;
+    const up = below < 160 && r.top - 8 > below; // no room below: open upwards
+    box.style.left = `${r.left}px`;
+    box.style.minWidth = `${r.width}px`;
+    box.style.top = up ? 'auto' : `${r.bottom + 2}px`;
+    box.style.bottom = up ? `${innerHeight - r.top + 2}px` : 'auto';
+    box.style.maxHeight = `${Math.min(up ? r.top - 8 : below, 240)}px`;
+  };
+  function close() {
+    box.hidden = true;
+    at = -1;
+    removeEventListener('scroll', place, true);
+    removeEventListener('resize', place);
+  }
+  const pick = (name) => { input.value = name; close(); };
+  const open = () => {
+    const q = foldName(input.value.trim());
+    dexNames ||= [...DEX.values()].flatMap((e) => [e.name, ...(e.forms.length > 1 ? e.forms.filter((f) => f[0]).map((f) => `${e.name} (${f[0]})`) : [])]);
+    const hits = !q ? [] : [...dexNames.filter((n) => foldName(n).startsWith(q)), ...dexNames.filter((n) => !foldName(n).startsWith(q) && foldName(n).includes(q))].slice(0, 50);
+    if (!hits.length) { close(); return; }
+    at = -1;
+    box.replaceChildren(...hits.map((n) => el('div', { class: 'suggest-item', role: 'option', text: n,
+      onmousedown: (e) => { e.preventDefault(); pick(n); } })));
+    box.hidden = false;
+    place();
+    addEventListener('scroll', place, true);
+    addEventListener('resize', place);
+  };
+  const move = (by) => {
+    const items = box.children;
+    if (at >= 0) items[at].classList.remove('on');
+    at = (at + by + items.length) % items.length;
+    items[at].classList.add('on');
+    items[at].scrollIntoView({ block: 'nearest' });
+  };
+  input.addEventListener('input', open);
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', (e) => {
+    if (box.hidden) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); move(e.key === 'ArrowDown' ? 1 : -1); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === 'Enter' && at >= 0) { e.preventDefault(); e.stopImmediatePropagation(); pick(box.children[at].textContent); }
+  });
+  return box;
+}
 // `allMine`: every row is the user's (day targets); otherwise every row can be starred, and rows the user added get a comment.
 function pokemonEditor(list, onChange, disabled, allMine = false, placeholder = 'Add Pokémon, e.g. Mega Gengar') {
   const items = list.map((p) => ({ ...p, ...(allMine ? { mine: true } : {}) }));
@@ -1334,7 +1507,8 @@ function pokemonEditor(list, onChange, disabled, allMine = false, placeholder = 
       }
       wrap.append(wrapRow);
     });
-    const input = el('input', { list: 'dexNames', placeholder, 'aria-label': 'Pokémon name', disabled });
+    const input = el('input', { placeholder, 'aria-label': 'Pokémon name', autocomplete: 'off', disabled });
+    const suggestions = suggestBox(input);
     const act = actSelect('raid');
     const add = () => {
       const name = input.value.trim();
@@ -1346,7 +1520,7 @@ function pokemonEditor(list, onChange, disabled, allMine = false, placeholder = 
       draw();
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
-    wrap.append(el('div', { class: 'pkadd' }, input, act, el('button', { class: 'btn', type: 'button', disabled, onclick: add, text: 'Add' })));
+    wrap.append(el('div', { class: 'pkadd' }, input, suggestions, act, el('button', { class: 'btn', type: 'button', disabled, onclick: add, text: 'Add' })));
   };
   draw();
   return wrap;
@@ -1564,8 +1738,6 @@ prefs = { ...prefs, ...(store.get(PREFS_KEY) || {}) };
 // A link like calendar.html#2026-11 opens that month.
 if (/^#\d{4}-\d{2}$/.test(location.hash)) prefs.month = location.hash.slice(1);
 // Species, plus "Name (Form)" for species with several forms, so a target can be e.g. Giratina (Origin).
-$('dexNames').append(...[...DEX.values()].flatMap((e) => [e.name,
-  ...(e.forms.length > 1 ? e.forms.filter((f) => f[0]).map((f) => `${e.name} (${f[0]})`) : [])]).map((v) => el('option', { value: v })));
 $('prev').onclick = () => shiftMonth(-1);
 $('next').onclick = () => shiftMonth(1);
 $('today').onclick = () => { prefs.month = null; savePrefs(); render(); };
@@ -1610,8 +1782,15 @@ $('helpExtras').append(
     'Location Background: a photo of the event city, in-person raids / Max Battles only (left)'),
   el('span', { class: 'help-pin' }, debutBadge({ debut: 'new' }), 'Pokémon GO debut (gold: shiny debut)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, meetPin()), 'trainer meetup that day (beside the date; hover for host, venue and time; right-click to mark it as attending, which circles the pin)'),
+  el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, hourPin({ kind: 'raid', from: '18:00', to: '19:00' })), 'Raid Hour or Max Battle Hour: the slice shows the hour, here 6–7 pm (top-left)'),
+  el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, lampPin()), 'Spotlight Hour (top-left)'),
+  el('span', { class: 'help-pin' }, el('span', { class: 'remotechip', text: 'R30' }), el('span', { class: 'remotechip nolimit', text: 'R∞' }), 'Remote Raid limit that day, or no limit (beside the date)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, lockPin('emea')), 'region-locked, another region (top-left)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, lockPin('apac')), 'region-locked, your region'));
+// The legend's key draws the same marks as the calendar.
+const LEGEND_MARKS = { sparkle, globe: () => globePin('event location'), meet: meetPin, lock: () => lockPin('emea'), lamp: lampPin,
+  hour: () => hourPin({ kind: 'raid', from: '18:00', to: '19:00' }) };
+for (const n of document.querySelectorAll('[data-mark]')) n.append(LEGEND_MARKS[n.dataset.mark]());
 $('helpBtn').onclick = () => $('help').showModal();
 $('helpClose').onclick = () => $('help').close();
 $('welcomeHelp').onclick = () => $('help').showModal();
