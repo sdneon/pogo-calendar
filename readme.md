@@ -8,7 +8,7 @@ Unofficial fan tool. Event data and Pokémon icons: Leek Duck. Pokémon GO is a 
 
 ## Using the calendar
 
-Open the [calendar page](https://sdneon.github.io/pogo-calendar/). The **?** button on the page explains everything below as well.
+Open the [calendar page](https://sdneon.github.io/pogo-calendar/). The **?** button on the page explains everything below as well, and the **☀ / ☾** button beside it switches between light and dark mode.
 
 ### Reading it
 
@@ -35,7 +35,7 @@ Open the [calendar page](https://sdneon.github.io/pogo-calendar/). The **?** but
   - for an orange padlock, when the event is live in that region, in SGT, for remote battles.
 
   Hovering an event bar shows the event's times and its Pokémon, with types. Hovering an event's name (an orange or ✈ day's title, a major event's time line, a "Running this month" chip) shows the same box as in the day panel.
-- **Meetups:** a 📍 pin beside a day's date means a trainer is hosting a meetup that day; hover it for the host, venue, time and event. Event, bar and Pokémon tooltips list the event's meetups too. **Right-click the pin** to mark that you're attending (the pin gets a circle); with several meetups that day, it opens the day so you can press **Attending?** on the right one. Whether you attend is never published.
+- **Meetups:** a 📍 pin beside a day's date means a trainer is hosting a meetup that day; hover it for the host, venue, time and event. **Click the pin** for the day's meetup timeline (priority trainers on top), shown beside the day panel; click a row to jump to its box. Event, bar and Pokémon tooltips list the event's meetups too. **Right-click the pin** to mark that you're attending (the pin gets a circle); with several meetups that day, it opens the day so you can press **Attending?** on the right one. Whether you attend is never published.
 - **Day colours:**
   - orange: super major event, with its name on top;
   - periwinkle: overseas event (✈). Times are converted to SGT, and raids need a Remote Raid Pass;

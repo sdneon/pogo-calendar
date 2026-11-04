@@ -29,6 +29,7 @@
     <button id="importBtn" class="btn" title="Add rest days, targets and edits from a shared file">Import</button>
     <input type="file" id="importFile" accept=".json,application/json" hidden>
     <button id="addEvent" class="btn primary">+ Add event</button>
+    <button id="themeBtn" class="btn icon" type="button" aria-label="Switch to light mode">☀</button>
     <button id="helpBtn" class="btn icon" aria-label="How to use this calendar" title="How to use this calendar">?</button>
   </div>
 </header>
@@ -162,6 +163,7 @@
 <aside id="day" class="day" hidden aria-label="Day details">
   <div class="day-head">
     <h2 id="dayTitle">Day</h2>
+    <button id="dayTimeline" class="btn tl-toggle" type="button" aria-pressed="false" hidden>Meetup timeline</button>
     <button id="dayClose" class="btn icon" aria-label="Close">×</button>
   </div>
   <label class="switch rest"><input type="checkbox" id="dayRest"> Rest day</label>
@@ -174,6 +176,14 @@
   <button id="dayAddEvent" class="btn">+ Add event on this day</button>
   <h3 id="dayCampfireHead" hidden>Campfire meetups</h3>
   <div id="dayCampfire" class="day-events"></div>
+</aside>
+
+<aside id="meetline" class="meetline" hidden aria-label="Meetup timeline">
+  <div class="day-head">
+    <h2 id="meetlineTitle">Meetups</h2>
+    <button id="meetlineClose" class="btn icon" aria-label="Close timeline">×</button>
+  </div>
+  <div id="meetlineBody"></div>
 </aside>
 
 <dialog id="editor" class="editor">

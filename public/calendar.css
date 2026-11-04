@@ -22,6 +22,7 @@
   --weekend: #6f8791;      /* Sat/Sun cell outline */
   --danger: #b4322a;
   --meet: #c2185b;         /* trainer meetup pin */
+  --tl-grid: #8fa1a8;      /* meetup timeline hour lines */
   --shadow: 0 10px 30px rgba(15, 40, 50, .18);
   --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
   --font-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
@@ -33,7 +34,7 @@
     --accent: #3bb7c7; --accent-ink: #062126; --today: #3bb7c7;
     --super: #4a3015; --super-ink: #ffc27a; --overseas: #24264a; --overseas-ink: #b7bbff;
     --rest: #1d3a22; --rest-ink: #9fdca5; --mundane: #131c20; --tip: #1e2b31; --weekend: #7f97a1;
-    --danger: #ef7a70; --meet: #f48fb1; --shadow: 0 10px 30px rgba(0, 0, 0, .5); color-scheme: dark;
+    --danger: #ef7a70; --meet: #f48fb1; --tl-grid: #ffffff; --shadow: 0 10px 30px rgba(0, 0, 0, .5); color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
@@ -41,7 +42,7 @@
   --accent: #3bb7c7; --accent-ink: #062126; --today: #3bb7c7;
   --super: #4a3015; --super-ink: #ffc27a; --overseas: #24264a; --overseas-ink: #b7bbff;
   --rest: #1d3a22; --rest-ink: #9fdca5; --mundane: #131c20; --tip: #1e2b31; --weekend: #7f97a1;
-  --danger: #ef7a70; --meet: #f48fb1; --shadow: 0 10px 30px rgba(0, 0, 0, .5); color-scheme: dark;
+  --danger: #ef7a70; --meet: #f48fb1; --tl-grid: #ffffff; --shadow: 0 10px 30px rgba(0, 0, 0, .5); color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -320,6 +321,60 @@ main { margin-top: 12px; overflow-x: auto; }
   margin: -16px -16px 0; padding: 12px 16px 8px; background: var(--surface); border-bottom: 1px solid var(--line);
 }
 .day h3 { margin-top: 8px; }
+.day-head .tl-toggle { margin: 0 8px 0 auto; font-size: .78rem; padding: 2px 10px; }
+.tl-toggle[aria-pressed="true"] { color: var(--meet); border-color: var(--meet); font-weight: 700; }
+.meet { cursor: pointer; }
+
+/* Meetup timeline: left of the day panel, mid-screen */
+.meetline {
+  position: fixed; top: 50%; right: calc(min(440px, 100%) + 14px); transform: translateY(-50%);
+  width: min(640px, calc(100vw - 440px - 40px)); max-height: calc(100vh - 32px); overflow-y: auto; z-index: 19;
+  background: var(--surface); box-shadow: var(--shadow); border-radius: 12px; padding: 16px; border-top: 3px solid var(--meet);
+}
+.meetline .day-head { border-radius: 12px 12px 0 0; margin-bottom: 6px; }
+.meetline h2 { font-size: 1.05rem; margin: 0; }
+.tl-row { display: grid; grid-template-columns: 11rem 1fr; gap: 10px; align-items: center; padding: 4px 6px; border-radius: 6px; }
+.tl-row:not(.tl-axis) { cursor: pointer; }
+.tl-row:not(.tl-axis):hover, .tl-row:focus-visible { background: color-mix(in srgb, var(--meet) 9%, transparent); outline: none; }
+.tl-axis { font-size: .75rem; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.tl-label { display: flex; flex-direction: column; min-width: 0; font-size: .85rem; line-height: 1.25; }
+.tl-label > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-label .muted { font-size: .74rem; }
+.tl-ticks { position: relative; height: 1.1em; }
+.tl-ticks span { position: absolute; transform: translateX(-50%); color: var(--muted); white-space: nowrap; }
+.tl-ticks span:first-child { transform: none; }
+.tl-ticks span:last-child { transform: translateX(-100%); }
+.tl-track {
+  position: relative; height: 22px; border-right: 1px solid var(--tl-grid);
+  background: repeating-linear-gradient(to right, var(--tl-grid) 0 1px, transparent 1px calc(100% / var(--n)));
+}
+.tl-bar {
+  position: absolute; top: 2px; bottom: 2px; min-width: 4px; border-radius: 5px; overflow: hidden;
+  background: color-mix(in srgb, var(--meet) 35%, var(--surface)); border: 1.5px solid var(--meet);
+  display: flex; align-items: center; padding: 0 5px; font-size: .7rem; color: var(--ink);
+}
+.tl-venue { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-row.going .tl-bar { background: var(--meet); color: var(--surface); font-weight: 700; }
+/* Raid / Max Battle / Spotlight hours: own rows on top, and a faint band on each meetup's track */
+.tl-hour .tl-label b { display: flex; align-items: center; gap: 4px; }
+.tl-hour .tl-label .hourpin, .tl-hour .tl-label .lamppin { position: static; width: 14px; height: 14px; flex: none; }
+.tl-hour .tl-track { height: 28px; }
+.tl-hour .tl-bar { --hc: #e8400c; background: color-mix(in srgb, var(--hc) 22%, var(--surface)); border-color: var(--hc); gap: 2px; padding: 0 3px; overflow: visible; }
+.tl-hour.max .tl-bar, .tl-band.max { --hc: #a43ad8; }
+.tl-hour.spotlight .tl-bar, .tl-band.spotlight { --hc: #e0a800; }
+.tl-band { --hc: #e8400c; position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--hc) 14%, transparent); }
+.mon.tl-mon { --s: 22px; }
+.mon.tl-mon > :not(img):not(.noimg) { display: none; }
+.tl-hour + .tl-cluster { margin-top: 6px; box-shadow: 0 -1px 0 var(--line); padding-top: 2px; }
+.tl-cluster.multi { border-left: 3px solid var(--meet); border-radius: 6px; margin: 2px 0; }
+.tl-now { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--accent); z-index: 1; }
+.evcard.flash { animation: tl-flash 1.2s ease-out; }
+@keyframes tl-flash { from { box-shadow: 0 0 0 3px var(--meet); } to { box-shadow: 0 0 0 3px transparent; } }
+@media (max-width: 960px) {
+  .meetline { top: 8px; left: 8px; right: 8px; width: auto; transform: none; max-height: calc(42vh - 16px); z-index: 21; }
+  .tl-open .day { top: 42vh; }
+  .tl-row { grid-template-columns: 8.5rem 1fr; }
+}
 .field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); min-width: 0; }
 .row .field { flex: 1 1 200px; }
 .field input, .field select, .field textarea {
@@ -403,4 +458,5 @@ main { margin-top: 12px; overflow-x: auto; }
   .evcount, .bar span { display: none; }
   .week { --lane: 7px; }
   .day { top: auto; height: 80%; width: 100%; border-radius: 14px 14px 0 0; padding-bottom: max(24px, env(safe-area-inset-bottom, 0px)); }
+  .tl-open .day { height: auto; }
 }

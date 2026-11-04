@@ -310,7 +310,7 @@ const spanDays = (ev) => { const [s, e] = evRange(ev); return (e - s) / 86400e3;
 const SHOW_FMT = new Map();
 function fmt(ms, opts, tz = HOME.tz) {
   const key = `${tz}|${JSON.stringify(opts)}`;
-  if (!SHOW_FMT.has(key)) SHOW_FMT.set(key, new Intl.DateTimeFormat(undefined, { timeZone: tz, ...opts }));
+  if (!SHOW_FMT.has(key)) SHOW_FMT.set(key, new Intl.DateTimeFormat(undefined, { timeZone: tz, ...(opts.hour ? { hour12: true } : {}), ...opts }));
   return SHOW_FMT.get(key).format(new Date(ms));
 }
 const fmtTime = (ms, tz) => fmt(ms, { hour: 'numeric', minute: '2-digit' }, tz);
@@ -617,7 +617,7 @@ async function openPublic() {
   try {
     const r = await api('GET', '/api/public');
     $('pubStatus').replaceChildren(r.upToDate
-      ? el('span', { class: 'pub-ok', text: `public/public.json is up to date (published ${new Date(r.publishedAt).toLocaleString()}).` })
+      ? el('span', { class: 'pub-ok', text: `public/public.json is up to date (published ${new Date(r.publishedAt).toLocaleString(undefined, { hour12: true })}).` })
       : el('span', { class: 'pub-warn', text: r.publishedAt ? 'You have changes that are not published yet: press Publish.' : 'Nothing published yet.' }),
       r.dropping?.length ? el('div', { class: 'pub-warn', text: `Publish will remove from the public site: ${r.dropping.join(', ')}.` }) : '');
   } catch (e) { $('pubStatus').textContent = `Could not check: ${e.message}`; }
@@ -821,8 +821,24 @@ const dayMeetups = (day) => [...visibleEvents().flatMap((ev) => (ev.hosts || [])
 let CF = []; // rebuilt by render()
 // Order of Campfire meetups in lists: attended first, then these hosts (display names, any case), then by start.
 const CF_PRIORITY_HOSTS = ['Sreebha', 'Huggable'];
-const cfPriority = (h) => CF_PRIORITY_HOSTS.some((n) => n.toLowerCase() === String(h.host).toLowerCase());
-const cfOrder = (a, b) => !!b.h.going - !!a.h.going || cfPriority(b.h) - cfPriority(a.h) || a.h.start.localeCompare(b.h.start);
+// Host names that look like the same trainer: any case, letters and digits only, one typo (or swapped pair) apart, or one inside the other.
+const hostKey = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+function sameHost(a, b) {
+  const x = hostKey(a), y = hostKey(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const [s, l] = x.length <= y.length ? [x, y] : [y, x];
+  if (s.length >= 5 && l.includes(s)) return true;
+  if (s.length < 4 || l.length - s.length > 1) return false;
+  let i = 0;
+  while (i < s.length && s[i] === l[i]) i++;
+  if (s.length > l.length - 1 && s[i] === l[i + 1] && s[i + 1] === l[i] && s.slice(i + 2) === l.slice(i + 2)) return true; // swapped pair
+  return s.length === l.length ? s.slice(i + 1) === l.slice(i + 1) : s.slice(i) === l.slice(i + 1);
+}
+const cfPriority = (h) => CF_PRIORITY_HOSTS.some((n) => sameHost(n, h.host));
+// 2: a priority host spelt right, 1: a near spelling, 0: other hosts.
+const cfRank = (h) => (CF_PRIORITY_HOSTS.some((n) => hostKey(n) === hostKey(h.host)) ? 2 : cfPriority(h) ? 1 : 0);
+const cfOrder = (a, b) => !!b.h.going - !!a.h.going || cfRank(b.h) - cfRank(a.h) || a.h.start.localeCompare(b.h.start);
 const cfNorm = (s) => String(s || '').toLowerCase().replace(/\s+day\s*\d+\s*$/, '').replace(/[^a-z0-9]+/g, '');
 function buildCampfire() {
   const cf = data.campfire;
@@ -1062,6 +1078,7 @@ function renderCell(key, col, month, todayKey) {
   const going = meets.some(({ h }) => h.going);
   const meetMark = meets.length ? el('span', { class: `meet${going ? ' going' : ''}`,
     'aria-label': `${meets.length} trainer meetup${meets.length > 1 ? 's' : ''}${going ? ', attending' : ''}`,
+    onclick: (e) => { e.stopPropagation(); showMeetups(key); },
     oncontextmenu: (e) => { e.preventDefault(); e.stopPropagation(); goingFromPin(key, meets); } }, meetPin(),
     meets.length > 1 ? el('span', { text: meets.length }) : null) : null;
   if (meetMark) MEET_TIP.set(meetMark, meets);
@@ -1279,7 +1296,7 @@ function showTip(target, x, y) {
   tip.style.top = `${Math.max(8, top)}px`;
 }
 document.addEventListener('mouseover', (e) => {
-  const m = e.target.closest?.('.mon, .bar, .evtip, .meet');
+  const m = e.target.closest?.('.mon, .bar, .evtip, .meet, .tl-row');
   if (m) showTip(m, e.clientX, e.clientY); else $('tip').hidden = true;
   // Hovering a bar lights all of that event's bars.
   const id = e.target.closest?.('.bar')?.dataset.ev;
@@ -1328,11 +1345,157 @@ function renderDay() {
   $('dayCampfireHead').hidden = !cfs.length;
   $('dayCampfireHead').textContent = `Campfire meetups (${cfs.length})`;
   $('dayCampfire').replaceChildren(...cfs.map(({ h, ev }) => cfCard(h, ev)));
+  renderTimeline();
+}
+
+// ---------- meetup timeline (left of the day panel) ----------
+// The day's meetups as bars on an hour axis: priority hosts on top, then attending, the user's own, by start.
+let timelineOn = false;
+const HOUR = 3600e3;
+// A meetup's times, and the part of them on `key` (SGT day); no start: its event's window.
+function meetSpan(h, ev, key) {
+  const [es, ee] = evRange(ev);
+  const s = h.start ? wallToUtc(h.start, HOME.tz) : es;
+  const e = h.start ? (h.end > h.start ? wallToUtc(h.end, HOME.tz) : s + HOUR) : ee;
+  return { s, e, from: Math.max(s, dayStart(key)), to: Math.min(Math.max(e, s + HOUR / 4), dayStart(addDays(key, 1))) };
+}
+const tlOrder = (a, b) => cfRank(b.h) - cfRank(a.h) || !!b.h.going - !!a.h.going || !b.h.campfire - !a.h.campfire
+  || a.span.from - b.span.from;
+// A venue as a short place name for a timeline bar: known places first, then towns, else the address tidied.
+const VENUE_PLACES = [
+  [/vivo\s*city/i, 'Vivo'], [/\bnex\b|s'?goon|serangoon/i, 'Nex'],
+  [/sports\s*hub|stadium|kallang\s*wave|the\s+kallang|tanjong\s+rhu|ocbc\s+square/i, 'Stadium'],
+  [/harbou?r\s*front|maritime\s+square/i, 'Harbourfront'], [/bukit\s+batok|gombak|hong\s+kah/i, 'Batok'],
+  [/suntec/i, 'Suntec'], [/jewel|changi\s+airport/i, 'Jewel'], [/gardens\s+by\s+the\s+bay/i, 'Gardens by the Bay'],
+  [/ang\s+mo\s+kio/i, 'AMK'], [/choa\s+chu\s+kang/i, 'CCK'], [/bukit\s+panjang/i, 'Bt Panjang'], [/bukit\s+merah/i, 'Bt Merah'],
+  [/toa\s+payoh/i, 'Toa Payoh'], [/jurong\s+east|perennial\s+business\s+city/i, 'Jurong East'], [/jurong\s+west/i, 'Jurong West'], [/pasir\s+ris/i, 'Pasir Ris'],
+  [/marina\s+bay/i, 'Marina Bay'], [/\b(punggol|sengkang|yishun|hougang|bedok|bishan|tampines|woodlands|clementi|sembawang|orchard|bugis|chinatown|sentosa|queenstown|kallang|novena|bukit\s+timah|geylang|tiong\s+bahru|dhoby\s+ghaut|paya\s+lebar|buona\s+vista|boon\s+lay|pioneer|tuas|seletar|changi|katong|simei|kembangan|eunos|aljunied|potong\s+pasir|braddell|marymount|khatib|admiralty|marsiling|kranji|yew\s+tee|lakeside|dover|holland)\b/i, null],
+];
+const CHAIN = /^(kfc|mcdonald'?s|starbucks|subway|koufu|kopitiam|food\s*junction|toast\s*box|ya\s*kun|burger\s*king|jollibee)\b/i;
+function shortVenue(v) {
+  const s = String(v || '').replace(/,\s*Singapore$/i, '');
+  for (const [re, name] of VENUE_PLACES) {
+    const m = s.match(re);
+    if (m) return name || m[0].replace(/\s+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  const tidy = (p) => p.replace(/.*\s@\s*/, '').replace(/#\d+-\d+/g, '').replace(/\(.*?\)/g, '')
+    .replace(/^(benches\s+)?(beside|outside|near|opposite|in\s+front\s+of|at)\s+/i, '')
+    .replace(/^(blk|block)\s*\d+\w*\s*/i, '').replace(/^\d+[a-z]?\s+/i, '').replace(/\bhdb\b\s*/i, '')
+    .replace(/\s+(stn|station|mrt|lrt|exit)\b.*$/i, '').replace(/\s+(koufu|food\s*court|foodcourt|kopitiam)\b.*$/i, '')
+    .replace(/\s+(avenue|ave|street|st|road|rd|drive|dr|crescent|cres|ring|walk|lane|central)\b.*$/i, '').trim();
+  const parts = s.split(',').map(tidy).filter(Boolean);
+  return parts.find((p) => !CHAIN.test(p)) || parts[0] || s;
+}
+// A day's local Raid / Max Battle hours (as on the cells) and Spotlight Hours, one per event and window, with their Pokémon.
+function dayHours(key) {
+  const out = new Map();
+  const add = (ev, kind, s, e, p) => {
+    const k = `${ev.id}|${kind}|${s}|${e}`;
+    if (!out.has(k)) out.set(k, { ev, kind, s, e, mons: [] });
+    if (p && !out.get(k).mons.some((q) => monKey(q) === monKey(p))) out.get(k).mons.push(p);
+  };
+  for (const ev of visibleEvents().filter((x) => onDay(x, key) && !isOverseas(x))) {
+    for (const p of eventPokemon(ev)) {
+      for (const h of hoursOf(p, ev)) if (hourDay(h, ev) === key) add(ev, h.kind, ...hourRange(h, ev), p);
+    }
+    const [s, e] = evRange(ev);
+    if (ev.type === 'pokémon-spotlight-hour' && e - s <= 2 * HOUR && homeDay(s) === key) {
+      add(ev, 'spotlight', s, e);
+      for (const p of eventPokemon(ev)) if (p.act === 'spotlight') add(ev, 'spotlight', s, e, p);
+    }
+  }
+  return [...out.values()].sort((a, b) => a.s - b.s);
+}
+// Pink pin on a cell: the day panel with the timeline; again on the same day closes both.
+function showMeetups(key) {
+  $('tip').hidden = true;
+  if (timelineOn && selected === key) return $('dayClose').click();
+  timelineOn = true;
+  openDay(key);
+}
+function renderTimeline() {
+  const key = selected;
+  const rows = key ? dayMeetups(key).map((m) => ({ ...m, span: meetSpan(m.h, m.ev, key) })).sort(tlOrder) : [];
+  $('dayTimeline').hidden = !rows.length;
+  $('dayTimeline').setAttribute('aria-pressed', String(timelineOn));
+  const box = $('meetline');
+  box.hidden = !timelineOn || !key;
+  document.body.classList.toggle('tl-open', !box.hidden);
+  if (box.hidden) return;
+  const [y, mo, d] = key.split('-').map(Number);
+  $('meetlineTitle').textContent = `Meetups · ${new Date(Date.UTC(y, mo - 1, d)).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}`;
+  if (!rows.length) return $('meetlineBody').replaceChildren(el('p', { class: 'muted', text: 'No meetups on this day.' }));
+  // Hour axis: from the first start to the last end (meetups and the day's hours), at least 4 hours, within the day.
+  const d0 = dayStart(key);
+  const d1 = dayStart(addDays(key, 1));
+  const hours = dayHours(key).map((x) => ({ ...x, from: Math.max(x.s, d0), to: Math.min(x.e, d1) })).filter((x) => x.to > x.from);
+  const spans = [...rows.map((r) => r.span), ...hours];
+  let a = Math.floor((Math.min(...spans.map((r) => r.from)) - d0) / HOUR);
+  let b = Math.ceil((Math.max(...spans.map((r) => r.to)) - d0) / HOUR);
+  if (b - a < 4) { b = Math.min(Math.round((d1 - d0) / HOUR), a + 4); a = Math.max(0, b - 4); }
+  const pos = (ms) => ((ms - d0) / HOUR - a) / (b - a) * 100;
+  const step = b - a > 12 ? 2 : 1;
+  const ticks = [];
+  for (let i = a; i <= b; i += step) ticks.push(el('span', { style: `left:${pos(d0 + i * HOUR)}%`, text: fmt(d0 + i * HOUR, { hour: 'numeric' }) }));
+  const now = Date.now();
+  const nowLine = () => (now > d0 + a * HOUR && now < d0 + b * HOUR ? el('span', { class: 'tl-now', style: `left:${pos(now)}%` }) : null);
+  const at = (x) => `left:${pos(x.from)}%;width:${Math.max(1, pos(x.to) - pos(x.from))}%`;
+  // Each hour also shades its window on every meetup's track.
+  const bands = () => hours.map((x) => el('span', { class: `tl-band ${x.kind}`, style: at(x) }));
+  const hourRow = (x) => {
+    const label = x.kind === 'spotlight' ? 'Spotlight Hour' : HOUR_LABEL[x.kind];
+    const wall = (ms) => utcToWall(ms, HOME.tz).slice(11, 16);
+    const names = x.mons.map((p) => p.name).join(', ');
+    // The bar shows the hour's Pokémon (their own tooltips); the rest of the row shows the event's box.
+    const r = el('div', { class: `tl-row tl-hour ${x.kind}`, role: 'button', tabindex: '0', onclick: () => focusMeet({ h: {}, ev: x.ev }),
+      onkeydown: (e) => { if (e.key === 'Enter') focusMeet({ h: {}, ev: x.ev }); } },
+    el('div', { class: 'tl-label' }, el('b', {}, x.kind === 'spotlight' ? lampPin() : hourPin({ kind: x.kind, from: wall(x.s), to: wall(x.e) }), label),
+      el('span', { class: 'muted', text: [`${fmtTime(x.from)} – ${fmtTime(x.to)}`, names || x.ev.title].join(' · ') })),
+    el('div', { class: 'tl-track', style: `--n:${(b - a) / step}` }, nowLine(),
+      el('span', { class: 'tl-bar', style: at(x) }, x.mons.length ? x.mons.map((p) => monIcon(p, x.ev, 'tl-mon'))
+        : el('span', { class: 'tl-venue', text: x.ev.title }))));
+    EV_TIP.set(r, x.ev);
+    return r;
+  };
+  const row = (m) => {
+    const { h, ev, span } = m;
+    const when = `${span.s < span.from ? '… ' : ''}${fmtTime(span.from)} – ${fmtTime(span.to)}${span.e > span.to ? ' …' : ''}`;
+    const r = el('div', { class: `tl-row${h.going ? ' going' : ''}`, role: 'button', tabindex: '0', onclick: () => focusMeet(m),
+      onkeydown: (e) => { if (e.key === 'Enter') focusMeet(m); } },
+    el('div', { class: 'tl-label' }, el('b', { text: h.host || 'Meetup' }),
+      el('span', { class: 'muted', text: [when, h.campfire ? `${h.campfire.going} going` : 'mine', h.going ? '✓ attending' : ''].filter(Boolean).join(' · ') })),
+    el('div', { class: 'tl-track', style: `--n:${(b - a) / step}` }, bands(), nowLine(),
+      el('span', { class: 'tl-bar', style: at(span) }, h.venue ? el('span', { class: 'tl-venue', text: shortVenue(h.venue) }) : null)));
+    MEET_TIP.set(r, [{ h, ev }]);
+    return r;
+  };
+  // Similar host names (typos) sit together, in the place of their best-ranked meetup; within, the right spelling first, then by start.
+  const clusters = [];
+  for (const m of rows) {
+    const c = clusters.find((list) => list.some((x) => sameHost(x.h.host, m.h.host)));
+    if (c) c.push(m); else clusters.push([m]);
+  }
+  $('meetlineBody').replaceChildren(
+    el('div', { class: 'tl-row tl-axis' }, el('div', { class: 'muted', text: `${rows.length} meetup${rows.length > 1 ? 's' : ''}, ${HOME.label}` }), el('div', { class: 'tl-ticks' }, ticks)),
+    ...hours.map(hourRow),
+    ...clusters.map((c) => el('div', { class: `tl-cluster${c.length > 1 ? ' multi' : ''}` }, c.sort((x, y) => cfRank(y.h) - cfRank(x.h) || x.span.from - y.span.from).map(row))));
+  // A venue shows in its bar only when a few letters fit.
+  for (const v of $('meetlineBody').querySelectorAll('.tl-venue')) if (v.parentNode.clientWidth < 40) v.remove();
+}
+// A timeline row's box in the day panel: scrolled into view and flashed.
+function focusMeet({ h, ev }) {
+  const card = h.campfire ? $('dayCampfire').querySelector(`[data-cf="${CSS.escape(String(h.campfire.id))}"]`)
+    : $('dayEvents').querySelector(`[data-ev="${CSS.escape(String(ev.id))}"]`);
+  if (!card) return;
+  card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  card.classList.remove('flash');
+  void card.offsetWidth;
+  card.classList.add('flash');
 }
 // A Campfire meetup in the day panel: its Campfire page, place, times, who hosts, the user's attending and targets.
 function cfCard(h, ev) {
   const m = h.campfire;
-  return el('div', { class: `evcard cfcard${h.going ? ' going' : ''}` },
+  return el('div', { class: `evcard cfcard${h.going ? ' going' : ''}`, 'data-cf': m.id },
     el('div', { class: 't' }, meetPin(), el('a', { href: m.url, target: '_blank', rel: 'noopener', text: m.name || ev.title }),
       el('span', { class: 'tag', text: `${m.going} going` })),
     el('div', { class: 'when', text: `${hostText({ start: h.start, end: h.end })} SGT · for ${ev.title}` }),
@@ -1362,7 +1525,7 @@ function evCard(ev, inTip) {
   }
   const hourRows = [...hourLines.values()].sort((a, b) => a.h.date.localeCompare(b.h.date))
     .map(({ h, names }) => el('div', { class: 'tip-hour' }, hourPin(h), el('span', { text: `${hourText(h, ev)}: ${names.join(', ')}` })));
-  return el('div', { class: `evcard tier-${tier}${isOverseas(ev) ? ' is-overseas' : ''}${ev.hidden ? ' hidden-ev' : ''}` },
+  return el('div', { class: `evcard tier-${tier}${isOverseas(ev) ? ' is-overseas' : ''}${ev.hidden ? ' hidden-ev' : ''}`, 'data-ev': ev.id },
       el('div', { class: 't' }, pin(TYPE_ACT[ev.type] || 'event'), el('b', { text: ev.title }),
         el('span', { class: 'tag', text: TIER_LABEL[tier] }),
         isOverseas(ev) ? el('span', { class: 'tag remote', text: 'remote' }) : null,
@@ -1746,6 +1909,19 @@ $('next').onclick = () => shiftMonth(1);
 $('today').onclick = () => { prefs.month = null; savePrefs(); render(); };
 $('bars').onchange = (e) => { prefs.bars = e.target.checked; savePrefs(); render(); };
 $('campfire').onchange = (e) => { prefs.campfire = e.target.checked; savePrefs(); render(); if (selected) renderDay(); };
+// Light / dark: follows the system until the button is used, then remembered (prefs.theme).
+const DARK_MQ = window.matchMedia?.('(prefers-color-scheme: dark)');
+const isDark = () => (prefs.theme ? prefs.theme === 'dark' : !!DARK_MQ?.matches);
+function applyTheme() {
+  if (prefs.theme) document.documentElement.dataset.theme = prefs.theme; else delete document.documentElement.dataset.theme;
+  const b = $('themeBtn');
+  b.textContent = isDark() ? '☀' : '☾';
+  b.setAttribute('aria-label', isDark() ? 'Switch to light mode' : 'Switch to dark mode');
+  b.title = b.getAttribute('aria-label');
+}
+$('themeBtn').onclick = () => { prefs.theme = isDark() ? 'light' : 'dark'; savePrefs(); applyTheme(); };
+DARK_MQ?.addEventListener?.('change', applyTheme);
+applyTheme();
 $('refresh').onclick = async () => {
   try { await api('POST', '/api/refresh'); data.refreshing = true; render(); setTimeout(load, 3000); }
   catch (e) { $('status').textContent = `Could not start a check: ${e.message}`; }
@@ -1784,7 +1960,7 @@ $('helpExtras').append(
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, globePin('event location')),
     'Location Background: a photo of the event city, in-person raids / Max Battles only (left)'),
   el('span', { class: 'help-pin' }, debutBadge({ debut: 'new' }), 'Pokémon GO debut (gold: shiny debut)'),
-  el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, meetPin()), 'trainer meetup that day (beside the date; hover for host, venue and time; right-click to mark it as attending, which circles the pin)'),
+  el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, meetPin()), 'trainer meetup that day (beside the date; hover for host, venue and time; click for the day\'s meetup timeline; right-click to mark it as attending, which circles the pin)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, hourPin({ kind: 'raid', from: '18:00', to: '19:00' })), 'Raid Hour or Max Battle Hour: the slice shows the hour, here 6–7 pm (top-left)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'help-mark' }, lampPin()), 'Spotlight Hour (top-left)'),
   el('span', { class: 'help-pin' }, el('span', { class: 'remotechip', text: 'R30' }), el('span', { class: 'remotechip nolimit', text: 'R∞' }), 'Remote Raid limit that day, or no limit (beside the date)'),
@@ -1802,8 +1978,12 @@ $('welcome').hidden = !STATIC || !!store.get(WELCOME_KEY);
 $('dayPublicRow').hidden = STATIC;
 $('addEvent').onclick = () => newEventOn(selected);
 $('dayAddEvent').onclick = () => newEventOn(selected);
+$('dayTimeline').onclick = () => { timelineOn = !timelineOn; renderTimeline(); };
+$('meetlineClose').onclick = () => { timelineOn = false; renderTimeline(); };
 $('dayClose').onclick = () => {
   selected = null;
+  timelineOn = false;
+  renderTimeline();
   $('day').hidden = true;
   for (const c of document.querySelectorAll('.cell.selected')) c.classList.remove('selected');
 };
