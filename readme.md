@@ -30,7 +30,7 @@ Open the [calendar page](https://sdneon.github.io/pogo-calendar/). The **?** but
   - its type(s), in type colours;
   - for a Mega, whether it can reach Super Max (Mega Level 4), and the extra Charged Attack that brings. Newly unlocked ones show their unlock day (a Super Mega Raid Day unlocks its Mega from that day);
   - for Spotlight Hours, the special bonus (e.g. 2× Catch Stardust);
-  - the hundo catch CP, normal and weather boosted;
+  - the hundo catch CP, as "normal / weather boosted" (Max Battles: one number, as their catches aren't boosted);
   - the event and its times;
   - for an orange padlock, when the event is live in that region, in SGT, for remote battles.
 

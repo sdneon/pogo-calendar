@@ -183,15 +183,20 @@ function superMaxInfo(p, ev) {
   return { move, from, state: t <= s ? 'yes' : t < e ? 'during' : 'later' };
 }
 
+// Battle-only forms: the catch after the battle is the base form (Megas already use the base form's stats).
+const CATCH_AS_BASE = new Set(['crowned sword', 'crowned shield', 'dawn wings', 'dusk mane', 'ultra', 'black', 'white',
+  'ice rider', 'shadow rider', 'eternamax']);
 // Hundo (15/15/15) catch CP at level 20, and level 25 when weather boosted.
 function hundo(p) {
   if (!RAID_ACTS.has(p.act) || !window.POGO_CPM) return null;
   const e = entryOf(p);
   if (!e || !e.forms.length) return null;
-  const form = formOf(p, e);
+  let form = formOf(p, e);
+  const asBase = CATCH_AS_BASE.has(form[0].toLowerCase());
+  if (asBase) form = e.forms.find((f) => f[0] === '' || f[0] === 'Normal') || e.forms[0];
   const [, a, d, s] = form;
   const cp = (cpm) => Math.max(10, Math.floor((a + 15) * Math.sqrt(d + 15) * Math.sqrt(s + 15) * cpm * cpm / 10));
-  return { form: form[0], cp20: cp(window.POGO_CPM[20]), cp25: MAX_ACTS.has(p.act) ? null : cp(window.POGO_CPM[25]) };
+  return { form: form[0], caught: asBase ? e.name : '', cp20: cp(window.POGO_CPM[20]), cp25: MAX_ACTS.has(p.act) ? null : cp(window.POGO_CPM[25]) };
 }
 // Icons: a chain of Leek Duck CDN candidates, tried in order until one loads:
 //   1. the Pokémon's own icon (from Leek Duck);
@@ -1157,8 +1162,8 @@ function tipContent({ p, ev, day }) {
   if (bonus) rows.push(el('div', { class: 'tip-bonus', text: `Bonus: ${bonus}` }));
   for (const hr of hoursOf(p, ev)) rows.push(el('div', { class: 'tip-hour' }, hourPin(hr), el('span', { text: hourText(hr, ev) })));
   if (h) {
-    rows.push(el('div', { class: 'tip-cp' }, el('span', { text: 'Hundo catch CP' }),
-      el('b', { text: String(h.cp20) }), h.cp25 ? el('span', { class: 'muted', text: `· weather boosted ${h.cp25}` }) : null));
+    rows.push(el('div', { class: 'tip-cp' }, el('span', { text: h.caught ? `Hundo catch CP (caught as ${h.caught})` : 'Hundo catch CP' }),
+      el('b', { text: h.cp25 ? `${h.cp20} / ${h.cp25}` : String(h.cp20) })));
   }
   if (p.debut) rows.push(el('div', { class: 'tip-debut', text: p.debut === 'shiny' ? 'Shiny debut: first time it can be shiny' : 'Pokémon GO debut' }));
   if (p.bg) {
